@@ -1,0 +1,66 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+
+    <uses-permission android:name="android.permission.INTERNET" />
+
+    <queries>
+        <package android:name="com.apple.android.music" />
+        <package android:name="org.lsposed.lspatch" />
+    </queries>
+
+    <!-- Keep native libs uncompressed in the APK: the LSPatch-embedded module is dlopen'ed straight from the APK path in the host process -->
+    <application
+        android:allowBackup="false"
+        android:extractNativeLibs="false"
+        android:icon="@mipmap/ic_launcher"
+        android:label="@string/app_name"
+        android:description="@string/xposed_description"
+        android:theme="@style/Theme.AppleMusicSing"
+        android:supportsRtl="true"
+        android:enableOnBackInvokedCallback="true"
+        android:usesCleartextTraffic="true">
+
+        <activity
+            android:name=".ui.MainActivity"
+            android:exported="true"
+            android:launchMode="singleTask">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+        <receiver
+            android:name=".provider.SettingsRequestReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="org.francasio.sing.REQUEST_SETTINGS" />
+            </intent-filter>
+        </receiver>
+
+        <provider
+            android:name=".provider.SingSettingsProvider"
+            android:authorities="org.francasio.sing.provider"
+            android:exported="true"
+            android:grantUriPermissions="true" />
+
+        <provider
+            android:name="io.github.libxposed.service.XposedProvider"
+            android:authorities="${applicationId}.XposedService"
+            android:exported="true" />
+
+        <!-- Strip auto-injected Microsoft ONNX Runtime telemetry ContentProvider that prematurely loads native libraries on startup -->
+        <provider
+            android:name="ai.onnxruntime.TelemetryInitializer"
+            android:authorities="${applicationId}.onnxruntime_telemetry_initializer"
+            tools:node="remove" />
+
+        <uses-native-library android:name="libcdsprpc.so" android:required="false" />
+        <uses-native-library android:name="vendor.qti.hardware.dsp@1.0.so" android:required="false" />
+
+        <!-- LibXposed API 102 module configuration and entry discovery live in META-INF/xposed/
+             (module.prop, java_init.list, scope.list). Module description is declared via android:description above. -->
+    </application>
+
+</manifest>

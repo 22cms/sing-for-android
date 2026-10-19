@@ -1,0 +1,684 @@
+package org.francasio.sing.audio
+
+import android.os.Process
+import android.util.Log
+import org.francasio.sing.audio.backend.InferenceBackend
+import org.francasio.sing.clock.MediaClockSyncHook
+import org.francasio.sing.util.ModelLoader
+import java.util.concurrent.atomic.AtomicLong
+import java.util.concurrent.locks.ReentrantLock
+import kotlin.concurrent.withLock
+
+/**
+ * Streaming Neural Stem Separation Engine.
+ * Supports both STFT spectrogram models (UVR-MDX-NET, Kim Inst)
+ * and direct Time-Domain streaming models (Apple Sing Vi-NNet).
+ * Employs a non-blocking ring-buffer pipeline to isolate stems
+ * with zero audio thread latency and robust seek synchronization.
+ */
+class AiStemSeparationEngine(
+    initialBackend: InferenceBackend
+) {
+    companion object {
+        private const val TAG = "AppleSing_AiEngine"
+        const val CHUNK_SAMPLES = StftEngine.TOTAL_SAMPLES // 261,120 frames (~5.92s @ 44.1kHz)
+        const val CROSSFADE_SAMPLES = 44100               // 44,100 frames (~1.0s crossfade between chunks)
+        const val HOP_SAMPLES = CHUNK_SAMPLES - CROSSFADE_SAMPLES // 217,020 frames (~4.92s step, 1.4x+ real-time)
+        const val PRE_ROLL_FRAMES = CHUNK_SAMPLES + HOP_SAMPLES // 478,140 frames (~10.84s initial buffer)
+        const val MAX_CUSHION_FRAMES = CHUNK_SAMPLES + 2 * HOP_SAMPLES // 695,160 frames (~15.76s max cushion)
+        const val ECO_TARGET_CUSHION_FRAMES = CHUNK_SAMPLES // 261,120 frames (~5.92s target buffer)
+        private const val RING_SIZE = 1 shl 20             // 1,048,576 frames (~23.7s ring buffer)
+        private const val RING_MASK = RING_SIZE - 1
+    }
+
+    private val stftEngine = StftEngine()
+
+    // Circular ring buffers (stereo interleaved: 2 floats per frame)
+    private val inRing = FloatArray(RING_SIZE * 2)
+    @Volatile private var inWriteFrames = 0L
+    @Volatile private var inProcessedFrames = 0L
+
+    private val vocalRing = FloatArray(RING_SIZE * 2)
+    @Volatile private var vocalWriteFrames = 0L
+    @Volatile private var vocalReadFrames = 0L
+
+    // Dedicated STFT worker buffers
+    private val chunkInPcm = FloatArray(CHUNK_SAMPLES * 2)
+    private val chunkStftTensor = FloatArray(StftEngine.MAX_TENSOR_SIZE)
+    private val chunkVocalTensor = FloatArray(StftEngine.MAX_TENSOR_SIZE)
+    private val chunkVocalPcm = FloatArray(CHUNK_SAMPLES * 2)
+
+    // Dedicated Time-domain worker buffers (Apple Sing Vi-NNet)
+    private val timeDomainInPcm = FloatArray(4096 * 2)
+    private val timeDomainOutPcm = FloatArray(4096 * 2)
+
+    private val lock = ReentrantLock()
+    private val workCond = lock.newCondition()
+    private val pacingCond = lock.newCondition()
+    @Volatile private var running = true
+
+    // Generation counter to immediately invalidate in-flight chunks on seek
+    private val seekGeneration = AtomicLong(0L)
+
+    private val workerThread = Thread({
+        Process.setThreadPriority(Process.THREAD_PRIORITY_MORE_FAVORABLE)
+        workerLoop()
+    }, "AppleSing_AiWorker").apply {
+        isDaemon = true
+        start()
+    }
+
+    @Volatile var active: Boolean = false
+    private var isBufferingInitialChunk = false
+    @Volatile private var endOfStreamSignaled = false
+
+    // Feature toggles
+    @Volatile var preserveSide: Boolean = false
+    @Volatile var twoWaySlider: Boolean = false
+    @Volatile var ecoMode: Boolean = true
+        set(value) {
+            val changed = (field != value)
+            field = value
+            if (changed && !value) {
+                lock.withLock {
+                    pacingCond.signalAll()
+                }
+            }
+        }
+
+    @Volatile private var currentBackend: InferenceBackend = initialBackend
+
+    val isTimeDomain: Boolean
+        get() = currentBackend.modelInfo.isTimeDomain
+
+    val isInstrumental: Boolean
+        get() = currentBackend.modelInfo.isInstrumental
+
+    fun updateBackend(newBackend: InferenceBackend) {
+        lock.withLock {
+            currentBackend = newBackend
+            seekGeneration.incrementAndGet()
+            inWriteFrames = 0L
+            inProcessedFrames = 0L
+            vocalWriteFrames = 0L
+            vocalReadFrames = 0L
+            endOfStreamSignaled = false
+            isBufferingInitialChunk = active
+            newBackend.resetStates()
+            workCond.signalAll()
+            pacingCond.signalAll()
+            Log.i(TAG, "AI engine updated with new inference backend (${newBackend.providerName}, timeDomain=${newBackend.modelInfo.isTimeDomain})")
+        }
+    }
+
+    fun activate() {
+        lock.withLock {
+            if (!active) {
+                active = true
+                seekGeneration.incrementAndGet()
+                isBufferingInitialChunk = true
+                endOfStreamSignaled = false
+                inWriteFrames = 0L
+                inProcessedFrames = 0L
+                vocalWriteFrames = 0L
+                vocalReadFrames = 0L
+                currentBackend.resetStates()
+                workCond.signalAll()
+                pacingCond.signalAll()
+                Log.i(TAG, "AI engine activated")
+            }
+        }
+    }
+
+    fun deactivate() {
+        lock.withLock {
+            if (active) {
+                active = false
+                seekGeneration.incrementAndGet()
+                isBufferingInitialChunk = false
+                endOfStreamSignaled = false
+                inWriteFrames = 0L
+                inProcessedFrames = 0L
+                vocalWriteFrames = 0L
+                vocalReadFrames = 0L
+                currentBackend.resetStates()
+                workCond.signalAll()
+                pacingCond.signalAll()
+                Log.i(TAG, "AI engine deactivated (0% CPU)")
+            }
+        }
+        MediaClockSyncHook.isBuffering = false
+        MediaClockSyncHook.bufferingOffsetUs = 0L
+        MediaClockSyncHook.latencyOffsetUs = 0L
+    }
+
+    /**
+     * Called by ExoPlayer's audio thread to push incoming raw PCM floats.
+     * Non-blocking, executes in < 0.02 ms.
+     */
+    fun pushInput(samples: FloatArray, frameCount: Int) {
+        if (!active) return
+
+        val totalFloats = frameCount * 2
+        val wp = inWriteFrames
+        for (i in 0 until totalFloats) {
+            val idx = ((wp * 2 + i) and (RING_MASK * 2 + 1).toLong()).toInt()
+            inRing[idx] = samples[i]
+        }
+        inWriteFrames = wp + frameCount
+
+        lock.withLock {
+            workCond.signal()
+        }
+    }
+
+    val isReady: Boolean
+        get() = active && vocalWriteFrames > 0L
+
+    val isEndOfStream: Boolean
+        get() = active && endOfStreamSignaled
+
+    val hasPendingOutput: Boolean
+        get() = active && endOfStreamSignaled && (vocalWriteFrames > vocalReadFrames)
+
+    val availableVocalFrames: Long
+        get() = if (active) maxOf(0L, vocalWriteFrames - vocalReadFrames) else 0L
+
+    val cushionFrames: Long
+        get() = if (active) maxOf(0L, inWriteFrames - vocalReadFrames) else 0L
+
+    val needsInitialChunkBurst: Boolean
+        get() = if (isTimeDomain) {
+            val needed = currentBackend.modelInfo.lookaheadSize + currentBackend.modelInfo.blockSize
+            active && vocalWriteFrames == 0L && ((inWriteFrames - inProcessedFrames) < needed)
+        } else {
+            active && vocalWriteFrames == 0L && ((inWriteFrames - inProcessedFrames) < CHUNK_SAMPLES)
+        }
+
+    val hasInitialChunkGathered: Boolean
+        get() = if (isTimeDomain) {
+            active && ((inWriteFrames - inProcessedFrames) >= currentBackend.modelInfo.blockSize)
+        } else {
+            active && ((inWriteFrames - inProcessedFrames) >= CHUNK_SAMPLES)
+        }
+
+    /**
+     * Flow control check called before accepting new audio frames into the pipeline.
+     */
+    fun canAcceptInput(frameCount: Int): Boolean {
+        if (!active) return true
+
+        if (vocalWriteFrames == 0L) {
+            val initialTarget = if (isTimeDomain) {
+                currentBackend.modelInfo.lookaheadSize + 2 * currentBackend.modelInfo.blockSize
+            } else {
+                PRE_ROLL_FRAMES
+            }
+            return (inWriteFrames + frameCount) <= (initialTarget + 4096)
+        }
+
+        // Steady-state backpressure: enforce max cushion to guarantee zero ring buffer wraparound
+        val cushion = inWriteFrames - vocalReadFrames
+        return (cushion + frameCount) < MAX_CUSHION_FRAMES
+    }
+
+    fun awaitProgress(timeoutMs: Long) {
+        lock.withLock {
+            try {
+                workCond.await(timeoutMs, java.util.concurrent.TimeUnit.MILLISECONDS)
+            } catch (e: InterruptedException) {
+                // Thread interrupted
+            }
+        }
+    }
+
+    fun onEndOfStream() {
+        lock.withLock {
+            endOfStreamSignaled = true
+            workCond.signalAll()
+            pacingCond.signalAll()
+            Log.i(TAG, "End of stream signaled to AI engine (inWrite=$inWriteFrames, inProcessed=$inProcessedFrames)")
+        }
+    }
+
+    fun isEnded(): Boolean {
+        return !active || (endOfStreamSignaled && inProcessedFrames >= inWriteFrames && vocalReadFrames >= vocalWriteFrames)
+    }
+
+    /**
+     * Called by ExoPlayer's audio thread to blend neural stem with original audio.
+     * Supports both instrumental and vocal models, Preserve-Side, and Two-Way Slider modes.
+     */
+    fun popVocalAndBlend(
+        outSamples: FloatArray,
+        frameCount: Int,
+        vocalLevel: Float
+    ): Int {
+        if (!active) {
+            return 0
+        }
+
+        if (vocalWriteFrames == 0L) {
+            return 0
+        }
+
+        if (isBufferingInitialChunk) {
+            isBufferingInitialChunk = false
+            MediaClockSyncHook.isBuffering = false
+            MediaClockSyncHook.bufferingOffsetUs = 0L
+            MediaClockSyncHook.latencyOffsetUs = 0L
+            Log.i(TAG, "AI pipeline primed! Zero-latency start. Synchronized lyrics clock.")
+        }
+
+        val availableVocal = (vocalWriteFrames - vocalReadFrames).toInt()
+        val toBlend = minOf(frameCount, maxOf(0, availableVocal))
+        var rp = vocalReadFrames
+
+        val isPreserveSide = preserveSide
+        val isTwoWay = twoWaySlider
+        val isInst = isInstrumental
+
+        // 1. Blend neural stem
+        for (i in 0 until toBlend) {
+            val idx = ((rp * 2) and (RING_MASK * 2 + 1).toLong()).toInt()
+            val inL = inRing[idx]
+            val inR = inRing[idx + 1]
+            val stemL = vocalRing[idx]
+            val stemR = vocalRing[idx + 1]
+
+            val rawInstL: Float
+            val rawInstR: Float
+            val rawVocalL: Float
+            val rawVocalR: Float
+
+            if (isInst) {
+                rawInstL = stemL
+                rawInstR = stemR
+                rawVocalL = inL - stemL
+                rawVocalR = inR - stemR
+            } else {
+                rawVocalL = stemL
+                rawVocalR = stemR
+                rawInstL = inL - stemL
+                rawInstR = inR - stemR
+            }
+
+            val vocalL: Float
+            val vocalR: Float
+            val instL: Float
+            val instR: Float
+
+            if (isPreserveSide) {
+                val midVocal = 0.5f * (rawVocalL + rawVocalR)
+                vocalL = midVocal
+                vocalR = midVocal
+                instL = inL - midVocal
+                instR = inR - midVocal
+            } else {
+                vocalL = rawVocalL
+                vocalR = rawVocalR
+                instL = rawInstL
+                instR = rawInstR
+            }
+
+            var outL: Float
+            var outR: Float
+
+            if (!isTwoWay) {
+                // Standard Sing Mode:
+                if (isInst && !isPreserveSide) {
+                    // Direct instrumental volume mixing avoids phase artifacts
+                    outL = instL + vocalLevel * (inL - instL)
+                    outR = instR + vocalLevel * (inR - instR)
+                } else {
+                    val attenuation = 1.0f - vocalLevel
+                    outL = inL - (attenuation * vocalL)
+                    outR = inR - (attenuation * vocalR)
+                }
+            } else {
+                // Two-Way Slider Mode:
+                if (vocalLevel <= 0.5f) {
+                    val alpha = vocalLevel / 0.5f
+                    if (isInst && !isPreserveSide) {
+                        outL = instL + alpha * (inL - instL)
+                        outR = instR + alpha * (inR - instR)
+                    } else {
+                        val attenuation = 1.0f - alpha
+                        outL = inL - (attenuation * vocalL)
+                        outR = inR - (attenuation * vocalR)
+                    }
+                } else {
+                    // Acapella Mode: vocal 100%, instrumental attenuated by (1 - beta)
+                    val beta = ((vocalLevel - 0.5f) / 0.5f).coerceIn(0.0f, 1.0f)
+                    val instGain = 1.0f - beta
+                    outL = vocalL + (instGain * instL)
+                    outR = vocalR + (instGain * instR)
+                }
+            }
+
+            // Digital limiter to prevent clipping and sanitize against NaN/Inf
+            if (outL.isNaN() || outL.isInfinite()) outL = inL
+            if (outR.isNaN() || outR.isInfinite()) outR = inR
+            if (outL > 1.0f) outL = 1.0f else if (outL < -1.0f) outL = -1.0f
+            if (outR > 1.0f) outR = 1.0f else if (outR < -1.0f) outR = -1.0f
+
+            outSamples[i * 2] = outL
+            outSamples[i * 2 + 1] = outR
+            rp++
+        }
+
+        // 2. Graceful underrun protection with smooth ramp
+        if (toBlend < frameCount) {
+            val missing = frameCount - toBlend
+            val invMissing = 1.0f / missing.toFloat()
+            for (i in toBlend until frameCount) {
+                val idx = ((rp * 2) and (RING_MASK * 2 + 1).toLong()).toInt()
+                val rampToRaw = (i - toBlend) * invMissing
+                val inL = inRing[idx]
+                val inR = inRing[idx + 1]
+                val lastOutL = if (toBlend > 0) outSamples[(toBlend - 1) * 2] else inL
+                val lastOutR = if (toBlend > 0) outSamples[(toBlend - 1) * 2 + 1] else inR
+
+                outSamples[i * 2] = (1.0f - rampToRaw) * lastOutL + rampToRaw * inL
+                outSamples[i * 2 + 1] = (1.0f - rampToRaw) * lastOutR + rampToRaw * inR
+                rp++
+            }
+        }
+
+        vocalReadFrames = minOf(vocalWriteFrames, rp)
+        return frameCount
+    }
+
+    fun reset() {
+        lock.withLock {
+            seekGeneration.incrementAndGet()
+            inWriteFrames = 0L
+            inProcessedFrames = 0L
+            vocalWriteFrames = 0L
+            vocalReadFrames = 0L
+            endOfStreamSignaled = false
+            isBufferingInitialChunk = active
+            currentBackend.resetStates()
+            workCond.signalAll()
+            pacingCond.signalAll()
+        }
+        MediaClockSyncHook.isBuffering = false
+        MediaClockSyncHook.bufferingOffsetUs = 0L
+        MediaClockSyncHook.latencyOffsetUs = 0L
+        Log.i(TAG, "AI engine reset for new track/seek (generation ${seekGeneration.get()})")
+    }
+
+    private fun workerLoop() {
+        Log.i(TAG, "AI Stem Separation Worker thread running")
+        // Time-domain inference timing, logged every 100 blocks so real-device
+        // throughput is always visible in logcat (budget: 92.9 ms / 4096-frame block)
+        var tmBlocks = 0L
+        var tmTotalMs = 0L
+        var tmMinMs = Long.MAX_VALUE
+        var tmMaxMs = 0L
+        while (running) {
+            if (isTimeDomain) {
+                // Time-domain inference (Apple Sing Vi-NNet: 4096-frame blocks with lookahead)
+                val blockSize = currentBackend.modelInfo.blockSize
+                val lookaheadSize = currentBackend.modelInfo.lookaheadSize
+
+                var myGen = 0L
+                var startFrame = 0L
+                var isFlushingDelay = false
+
+                lock.withLock {
+                    while (running && (!active || (
+                        (inWriteFrames - inProcessedFrames) < blockSize && !endOfStreamSignaled
+                    ))) {
+                        try {
+                            workCond.await()
+                        } catch (e: InterruptedException) {
+                            return
+                        }
+                    }
+                    if (!running || !active) return@withLock
+
+                    myGen = seekGeneration.get()
+                    startFrame = inProcessedFrames
+                    val available = inWriteFrames - startFrame
+
+                    if (available >= blockSize) {
+                        for (i in 0 until blockSize * 2) {
+                            val idx = ((startFrame * 2 + i) and (RING_MASK * 2 + 1).toLong()).toInt()
+                            timeDomainInPcm[i] = inRing[idx]
+                        }
+                        inProcessedFrames = startFrame + blockSize
+                    } else if (endOfStreamSignaled && available > 0) {
+                        val availCount = available.toInt()
+                        for (i in 0 until availCount * 2) {
+                            val idx = ((startFrame * 2 + i) and (RING_MASK * 2 + 1).toLong()).toInt()
+                            timeDomainInPcm[i] = inRing[idx]
+                        }
+                        java.util.Arrays.fill(timeDomainInPcm, availCount * 2, blockSize * 2, 0.0f)
+                        inProcessedFrames = inWriteFrames
+                    } else if (endOfStreamSignaled && vocalWriteFrames < inWriteFrames) {
+                        // Flushing remaining lookahead delay frames with zero padding
+                        java.util.Arrays.fill(timeDomainInPcm, 0, blockSize * 2, 0.0f)
+                        isFlushingDelay = true
+                    } else {
+                        return@withLock
+                    }
+                }
+
+                if (!running || !active) continue
+
+                try {
+                    val nnT0 = System.nanoTime()
+                    currentBackend.runTimeDomain(timeDomainInPcm, timeDomainOutPcm, blockSize)
+                    val nnMs = (System.nanoTime() - nnT0) / 1_000_000
+                    tmBlocks++
+                    tmTotalMs += nnMs
+                    if (nnMs < tmMinMs) tmMinMs = nnMs
+                    if (nnMs > tmMaxMs) tmMaxMs = nnMs
+                    if (tmBlocks % 100 == 0L) {
+                        Log.i(TAG, "Time-domain NN: $tmBlocks blocks, avg ${tmTotalMs / tmBlocks} ms, min $tmMinMs ms, max $tmMaxMs ms (budget 92.9 ms/block, ${currentBackend.providerName})")
+                    }
+
+                    var isStale = false
+                    lock.withLock {
+                        if (!running || !active || myGen != seekGeneration.get()) {
+                            isStale = true
+                        } else {
+                            // Model delay is lookaheadSize (16,384 samples)
+                            val destFrame = startFrame - lookaheadSize
+                            val targetEnd = destFrame + blockSize
+
+                            for (i in 0 until blockSize) {
+                                val framePos = destFrame + i
+                                if (framePos in 0 until inWriteFrames) {
+                                    val idx = ((framePos * 2) and (RING_MASK * 2 + 1).toLong()).toInt()
+                                    val sL = timeDomainOutPcm[i * 2]
+                                    val sR = timeDomainOutPcm[i * 2 + 1]
+                                    vocalRing[idx] = if (sL.isNaN() || sL.isInfinite()) 0.0f else sL
+                                    vocalRing[idx + 1] = if (sR.isNaN() || sR.isInfinite()) 0.0f else sR
+                                }
+                            }
+
+                            if (targetEnd > 0) {
+                                vocalWriteFrames = maxOf(vocalWriteFrames, minOf(inWriteFrames, targetEnd))
+                            }
+
+                            if (isFlushingDelay) {
+                                inProcessedFrames += blockSize
+                            }
+
+                            workCond.signalAll()
+
+                            // Eco-mode thermal pacing
+                            val curCushion = maxOf(0L, vocalWriteFrames - vocalReadFrames)
+                            val targetCushion = 88200L // ~2.0s target cushion for time-domain
+                            if (ecoMode && !endOfStreamSignaled && curCushion > targetCushion) {
+                                while (running && active && ecoMode && !endOfStreamSignaled && myGen == seekGeneration.get()) {
+                                    val cushion = maxOf(0L, vocalWriteFrames - vocalReadFrames)
+                                    if (cushion <= targetCushion) break
+                                    val excess = cushion - targetCushion
+                                    val waitMs = minOf(200L, maxOf(20L, (excess * 1000L) / 44100L))
+                                    try {
+                                        pacingCond.await(waitMs, java.util.concurrent.TimeUnit.MILLISECONDS)
+                                    } catch (e: InterruptedException) {
+                                        return
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    if (isStale) continue
+                } catch (e: Throwable) {
+                    Log.e(TAG, "Time-domain inference error: ${e.message}", e)
+                }
+
+            } else {
+                // STFT spectrogram inference (UVR-MDX-NET / Kim Inst)
+                var myGen = 0L
+                var startFrame = 0L
+
+                lock.withLock {
+                    while (running && (!active || (
+                        (inWriteFrames - inProcessedFrames) < CHUNK_SAMPLES && !endOfStreamSignaled
+                    ))) {
+                        try {
+                            workCond.await()
+                        } catch (e: InterruptedException) {
+                            return
+                        }
+                    }
+                    if (!running || !active) return@withLock
+
+                    myGen = seekGeneration.get()
+                    startFrame = inProcessedFrames
+                    val available = inWriteFrames - startFrame
+
+                    if (available >= CHUNK_SAMPLES) {
+                        for (i in 0 until CHUNK_SAMPLES * 2) {
+                            val idx = ((startFrame * 2 + i) and (RING_MASK * 2 + 1).toLong()).toInt()
+                            chunkInPcm[i] = inRing[idx]
+                        }
+                        inProcessedFrames = startFrame + HOP_SAMPLES
+                    } else if (endOfStreamSignaled && available > 0) {
+                        val availCount = available.toInt()
+                        for (i in 0 until availCount * 2) {
+                            val idx = ((startFrame * 2 + i) and (RING_MASK * 2 + 1).toLong()).toInt()
+                            chunkInPcm[i] = inRing[idx]
+                        }
+                        java.util.Arrays.fill(chunkInPcm, availCount * 2, CHUNK_SAMPLES * 2, 0.0f)
+                        inProcessedFrames = inWriteFrames
+                    } else {
+                        return@withLock
+                    }
+                }
+
+                if (!running || !active) continue
+
+                try {
+                    val t0 = System.currentTimeMillis()
+                    val currentBins = currentBackend.numBins
+
+                    stftEngine.forward(chunkInPcm, chunkStftTensor, currentBins)
+                    val tStft = System.currentTimeMillis()
+
+                    currentBackend.run(chunkStftTensor, chunkVocalTensor)
+                    val tInf = System.currentTimeMillis()
+
+                    stftEngine.inverse(chunkVocalTensor, chunkVocalPcm, currentBins)
+                    val t1 = System.currentTimeMillis()
+                    Log.i(TAG, "STFT chunk separated in ${t1 - t0} ms [stft=${tStft - t0}ms, nn=${tInf - tStft}ms, istft=${t1 - tInf}ms] (window: 5.92s, step: 4.92s, gen: $myGen, provider: ${currentBackend.providerName})")
+
+                    var isStale = false
+                    lock.withLock {
+                        if (!running || !active || myGen != seekGeneration.get()) {
+                            isStale = true
+                        } else {
+                            writeVocalWithOverlapAdd(chunkVocalPcm, startFrame)
+                            workCond.signalAll()
+
+                            val curCushion = maxOf(0L, vocalWriteFrames - vocalReadFrames)
+                            if (ecoMode && !endOfStreamSignaled) {
+                                var cushion = curCushion
+                                if (cushion > ECO_TARGET_CUSHION_FRAMES) {
+                                    while (running && active && ecoMode && !endOfStreamSignaled && myGen == seekGeneration.get()) {
+                                        cushion = maxOf(0L, vocalWriteFrames - vocalReadFrames)
+                                        if (cushion <= ECO_TARGET_CUSHION_FRAMES) {
+                                            break
+                                        }
+                                        val excessFrames = cushion - ECO_TARGET_CUSHION_FRAMES
+                                        val waitMs = minOf(500L, maxOf(20L, (excessFrames * 1000L) / 44100L))
+                                        try {
+                                            pacingCond.await(waitMs, java.util.concurrent.TimeUnit.MILLISECONDS)
+                                        } catch (e: InterruptedException) {
+                                            return
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    if (isStale) {
+                        Log.i(TAG, "Discarded chunk from stale seek generation ($myGen vs ${seekGeneration.get()})")
+                        continue
+                    }
+
+                } catch (e: Throwable) {
+                    Log.e(TAG, "AI separation error: ${e.message}", e)
+                }
+            }
+        }
+    }
+
+    private fun writeVocalWithOverlapAdd(vocalPcm: FloatArray, chunkStartFrame: Long) {
+        val targetEnd = chunkStartFrame + CHUNK_SAMPLES
+        val actualEnd = if (endOfStreamSignaled && inProcessedFrames >= inWriteFrames) {
+            minOf(inWriteFrames, targetEnd)
+        } else {
+            targetEnd
+        }
+
+        if (vocalWriteFrames == 0L) {
+            for (i in 0 until CHUNK_SAMPLES) {
+                val idx = (((chunkStartFrame + i) * 2) and (RING_MASK * 2 + 1).toLong()).toInt()
+                vocalRing[idx] = vocalPcm[i * 2]
+                vocalRing[idx + 1] = vocalPcm[i * 2 + 1]
+            }
+            vocalWriteFrames = actualEnd
+        } else {
+            val invCrossfade = 1.0f / CROSSFADE_SAMPLES.toFloat()
+            for (i in 0 until CROSSFADE_SAMPLES) {
+                val framePos = chunkStartFrame + i
+                val idx = ((framePos * 2) and (RING_MASK * 2 + 1).toLong()).toInt()
+
+                val ramp = i * invCrossfade
+                val invRamp = 1.0f - ramp
+
+                val prevL = vocalRing[idx]
+                val prevR = vocalRing[idx + 1]
+                val currL = vocalPcm[i * 2]
+                val currR = vocalPcm[i * 2 + 1]
+
+                vocalRing[idx] = invRamp * prevL + ramp * currL
+                vocalRing[idx + 1] = invRamp * prevR + ramp * currR
+            }
+
+            for (i in CROSSFADE_SAMPLES until CHUNK_SAMPLES) {
+                val framePos = chunkStartFrame + i
+                val idx = ((framePos * 2) and (RING_MASK * 2 + 1).toLong()).toInt()
+                vocalRing[idx] = vocalPcm[i * 2]
+                vocalRing[idx + 1] = vocalPcm[i * 2 + 1]
+            }
+
+            vocalWriteFrames = actualEnd
+        }
+    }
+
+    fun release() {
+        running = false
+        lock.withLock {
+            workCond.signalAll()
+            pacingCond.signalAll()
+        }
+        stftEngine.close()
+    }
+}

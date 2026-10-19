@@ -1,0 +1,12 @@
+id=org.francasio.sing
+name=Sing for Android
+version=v1.0
+versionCode=1
+author=francasio
+description=A reimplementation of Apple Music Sing mode for Android with on-device Hardware accelerated stem separation.
+minApiVersion=102
+targetApiVersion=102
+staticScope=true
+autoHotReload=false
+exceptionMode=protective
+

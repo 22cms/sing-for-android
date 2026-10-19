@@ -1,0 +1,39 @@
+# Built application files
+*.apk
+*.aar
+*.ap_
+*.aab
+*.idsig
+app/release/
+release/
+
+# Keystore files
+*.jks
+*.keystore
+
+# Local configuration
+local.properties
+.gradle/
+build/
+app/build/
+
+# Android Studio / IntelliJ IDEA
+.idea/
+*.iml
+.DS_Store
+/captures
+
+# CMake / NDK build outputs
+.cxx/
+.externalNativeBuild/
+app/.cxx/
+
+# Scratch & development artifacts
+scratch/
+artifacts/
+*.log
+
+# Large weight / model binaries
+*.onnx
+*.tflite
+*.vinet

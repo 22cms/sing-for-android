@@ -1,0 +1,6 @@
+LIBDL_ANDROID {
+  global:
+    android_get_exported_namespace;
+  local:
+    *;
+};
