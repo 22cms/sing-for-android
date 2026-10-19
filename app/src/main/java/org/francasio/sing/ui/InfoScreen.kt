@@ -118,6 +118,11 @@ fun InfoScreen(
             authors = "KimberleyJSN & UVR Development Team",
             description = "Vocal and instrumental stem separation model weights."
         ),
+        ThirdPartyProject(
+            name = "KISS FFT",
+            authors = "Mark Borgerding (mborgerding)",
+            description = "Fast Fourier Transform (FFT) library that tries to Keep It Simple, Stupid"
+        ),
     )
 
     Box(
