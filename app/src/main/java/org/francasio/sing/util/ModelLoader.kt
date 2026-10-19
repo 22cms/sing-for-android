@@ -633,7 +633,7 @@ object ModelLoader {
                 native
             } else if (modelInfo.engine == SingSettings.ENGINE_MNN) {
                 Log.i(TAG, "Initializing MNN backend for ${modelInfo.id} (${modelFile.name}, threads=$targetThreads, target=$hardwareTarget)...")
-                if (hardwareTarget == SingSettings.TARGET_NPU) {
+                if (hardwareTarget == SingSettings.TARGET_NPU || hardwareTarget == SingSettings.TARGET_NNAPI) {
                     try {
                         val factoryClass = Class.forName("org.francasio.sing.audio.backend.OnnxBackendFactory")
                         val method = factoryClass.getMethod(
