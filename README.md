@@ -3,7 +3,7 @@
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
 [![Platform](https://img.shields.io/badge/Platform-Android%2011%2B-green.svg)](https://android.com)
 
-**Sing for Android** is an Xposed module that attempts to bring Apple Music's iOS-exclusive **Sing Mode** on the official Android app. It hooks into the Apple Music audio pipeline to isolate, attenuate, or boost vocals on the fly with low latency and hardware acceleration.
+**Sing for Android** is an Xposed module that attempts to bring Apple Music's iOS-exclusive **Sing Mode** on the official Android app. It hooks into the Apple Music audio pipeline to isolate, attenuate, or boost vocals on the fly with low latency and hardware acceleration support.
 
 ---
 
@@ -20,16 +20,15 @@
 - **Real-Time On-Device Stem Separation**: Separates vocals from backing tracks in real time during audio playback entirely locally, using whatever hardware accelerator you think is the best to use.
 - **Hardware Acceleration**:
   - **Qualcomm Hexagon HTP / NPU**: Powered by ONNX Runtime with Qualcomm QNN Execution Provider for super high speed real time processing with low thermals and battery drain.
-  - **OpenCL / Vulkan GPU & NNAPI**: Powered by Alibaba MNN for cross-platform GPU acceleration.
+  - **OpenCL / Vulkan GPU & NNAPI**: Powered by Alibaba MNN for cross-platform GPU acceleration and NNAPI support.
   - **Multi-threaded CPU Fallback**: High-performance portable fallback with configurable thread.
-- **Multiple Model Architectures**:
+- **Multiple Model to choose from**:
   - **MDX-Net** (Kim Inst, UVR 1-9703) in FP16 / FP32 precision.
   - **Apple Sing (Vi-NNet)** native reference engine.
 - **Advanced Playback & Slider Controls**:
   - **Two-Way Slider**: 0%–50% attenuates vocals for karaoke singing; 50%–100% attenuates the instrumental track for acapella vocal isolation.
-  - **Remove Volume Limits**: Allows full muting of vocals or instrumental tracks without triggering Sing deactivation.
-  - **Enable for All Songs**: Overrides server-side restrictions and missing time-synced lyrics to enable Sing across the entire music catalog.
-  - **Preserve Side Channel**: Keeps backing vocals, stereo reverbs, and spatial effects natural.
+  - **Bypass all client/server-side limitations**: Enable Sing on all songs, even those iOS will refuse to work with, and allow the slider to go all the way down & up.
+  - **Preserve Side Channel**: Keep backing vocals, stereo reverbs, and vocoder vocal effects in the audio mix.
 - **Modern Expressive UI**:
   - Material 3 Expressive and dynamic **Material You** theming adapting to your wallpaper palette.
 
