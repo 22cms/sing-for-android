@@ -104,7 +104,7 @@ object SingSettings {
     var forceSongEligibility: Boolean = false
 
     @Volatile
-    var materialYou: Boolean = false
+    var materialYou: Boolean = true
 
     @Volatile
     var lastHeartbeatTime: Long = 0L
@@ -130,7 +130,7 @@ object SingSettings {
         }
         allowZeroFloor = prefs.getBoolean(KEY_ALLOW_ZERO_FLOOR, false)
         forceSongEligibility = prefs.getBoolean(KEY_FORCE_SONG_ELIGIBILITY, false)
-        materialYou = prefs.getBoolean(KEY_MATERIAL_YOU, false)
+        materialYou = prefs.getBoolean(KEY_MATERIAL_YOU, true)
         lastHeartbeatTime = prefs.getLong(KEY_HEARTBEAT_TIME, 0L)
         lastHeartbeatManager = prefs.getString(KEY_HEARTBEAT_MANAGER, null)
         activeProvider = prefs.getString(KEY_ACTIVE_PROVIDER, "") ?: ""
