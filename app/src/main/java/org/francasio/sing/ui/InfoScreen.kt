@@ -1,6 +1,14 @@
 package org.francasio.sing.ui
 
 import android.content.Context
+import org.francasio.sing.ui.components.CollapsingTopBarDefaults
+import org.francasio.sing.ui.components.ExpressiveCollapsingTopBar
+import org.francasio.sing.ui.components.GroupedCardItem
+import org.francasio.sing.ui.components.NavigationIcon
+import org.francasio.sing.ui.components.SectionHeader
+import org.francasio.sing.ui.components.SettingActionRow
+import org.francasio.sing.ui.components.SettingSwitchRow
+import org.francasio.sing.ui.components.rememberCollapsingProgress
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -74,25 +82,11 @@ fun InfoScreen(
 ) {
     val context = LocalContext.current
     val scrollState = rememberScrollState()
-    val density = LocalDensity.current
-
     val statusBarTop = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
-    val pinnedTopBarHeight = 64.dp
-    val totalPinnedHeight = pinnedTopBarHeight + statusBarTop
-
-    val collapseRange = 100.dp
-    val collapseRangePx = with(density) { collapseRange.toPx() }
-    val progress = if (collapseRangePx > 0f) {
-        (scrollState.value.toFloat() / collapseRangePx).coerceIn(0f, 1f)
-    } else 0f
-
-    val titleFontSize = (34f - 14f * progress).sp
-    val titleStartX = 20.dp
-    val titleEndX = 68.dp
-    val currentTitleX = titleStartX + (titleEndX - titleStartX) * progress
-    val titleStartY = statusBarTop + 68.dp
-    val titleEndY = statusBarTop + (pinnedTopBarHeight - 26.dp) / 2
-    val currentTitleY = titleStartY - (titleStartY - titleEndY) * progress
+    val progress = rememberCollapsingProgress(
+        scrollState = scrollState,
+        collapseRange = CollapsingTopBarDefaults.CollapseRangeCompact
+    )
 
     val appVersion = try {
         val pInfo = context.packageManager.getPackageInfo(context.packageName, 0)
@@ -207,22 +201,14 @@ fun InfoScreen(
             Spacer(modifier = Modifier.height(20.dp))
 
             // 2. Theming Section
-            Text(
-                text = stringResource(id = R.string.info_theming_title),
-                color = if (isMaterialYou) Primary else TextSecondary,
-                fontSize = 14.sp,
-                fontWeight = FontWeight.SemiBold,
-                modifier = Modifier.padding(start = 12.dp, bottom = 8.dp)
+            SectionHeader(
+                title = stringResource(id = R.string.info_theming_title),
+                modifier = Modifier.padding(bottom = 8.dp)
             )
 
-            Card(
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(16.dp),
-                colors = CardDefaults.cardColors(containerColor = CardDark),
-                elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
-            ) {
+            GroupedCardItem(index = 0, total = 1) {
                 SettingSwitchRow(
-                    icon = rememberVectorPainter(Icons.Outlined.Palette),
+                    icon = Icons.Outlined.Palette,
                     title = stringResource(id = R.string.info_material_you_title),
                     description = stringResource(id = R.string.info_material_you_desc),
                     checked = materialYou,
@@ -233,67 +219,27 @@ fun InfoScreen(
             Spacer(modifier = Modifier.height(20.dp))
 
             // 3. Source Code / GitHub
-            Card(
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(16.dp),
-                colors = CardDefaults.cardColors(containerColor = CardDark),
-                elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
-            ) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clickable {
-                            try {
-                                val intent = Intent(Intent.ACTION_VIEW, Uri.parse("https://github.com/22cms/sing-for-android"))
-                                context.startActivity(intent)
-                            } catch (_: Throwable) {}
-                        }
-                        .padding(horizontal = 18.dp, vertical = 15.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Icon(
-                        imageVector = Icons.Outlined.Code,
-                        contentDescription = null,
-                        tint = Color.White,
-                        modifier = Modifier.size(24.dp)
-                    )
-
-                    Spacer(modifier = Modifier.width(16.dp))
-
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            text = stringResource(id = R.string.info_github_title),
-                            color = TextPrimary,
-                            fontSize = 15.sp,
-                            fontWeight = FontWeight.SemiBold
-                        )
-                        Text(
-                            text = stringResource(id = R.string.info_github_desc),
-                            color = TextSecondary,
-                            fontSize = 12.sp,
-                            lineHeight = 16.sp,
-                            modifier = Modifier.padding(top = 2.dp)
-                        )
+            GroupedCardItem(index = 0, total = 1) {
+                SettingActionRow(
+                    icon = Icons.Outlined.Code,
+                    title = stringResource(id = R.string.info_github_title),
+                    description = stringResource(id = R.string.info_github_desc),
+                    trailingIcon = Icons.AutoMirrored.Filled.OpenInNew,
+                    onClick = {
+                        try {
+                            val intent = Intent(Intent.ACTION_VIEW, Uri.parse("https://github.com/22cms/sing-for-android"))
+                            context.startActivity(intent)
+                        } catch (_: Throwable) {}
                     }
-
-                    Icon(
-                        imageVector = Icons.AutoMirrored.Filled.OpenInNew,
-                        contentDescription = null,
-                        tint = TextSecondary,
-                        modifier = Modifier.size(18.dp)
-                    )
-                }
+                )
             }
 
             Spacer(modifier = Modifier.height(20.dp))
 
             // 4. Third-Party Projects Card
-            Text(
-                text = stringResource(id = R.string.info_third_party_title),
-                color = if (isMaterialYou) Primary else TextSecondary,
-                fontSize = 14.sp,
-                fontWeight = FontWeight.SemiBold,
-                modifier = Modifier.padding(start = 12.dp, bottom = 8.dp)
+            SectionHeader(
+                title = stringResource(id = R.string.info_third_party_title),
+                modifier = Modifier.padding(bottom = 8.dp)
             )
 
             Card(
@@ -344,49 +290,11 @@ fun InfoScreen(
             Spacer(modifier = Modifier.navigationBarsPadding())
         }
 
-        // Pinned Top Bar Background
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(totalPinnedHeight)
-                .background(SurfaceDark.copy(alpha = progress * 0.96f))
-        ) {
-            if (progress > 0.05f) {
-                HorizontalDivider(
-                    color = DividerDark.copy(alpha = progress),
-                    modifier = Modifier.align(Alignment.BottomCenter)
-                )
-            }
-        }
-
-        // Back circle button
-        Box(
-            modifier = Modifier
-                .offset(
-                    x = 16.dp,
-                    y = statusBarTop + (pinnedTopBarHeight - 40.dp) / 2
-                )
-                .size(40.dp)
-                .clip(CircleShape)
-                .background(SurfaceContainerHigh.copy(alpha = 0.7f + progress * 0.3f))
-                .clickable(onClick = onBack),
-            contentAlignment = Alignment.Center
-        ) {
-            Icon(
-                imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                contentDescription = "Back",
-                tint = Color.White,
-                modifier = Modifier.size(20.dp)
-            )
-        }
-
-        // Large Page Title
-        Text(
-            text = stringResource(id = R.string.title_info),
-            color = TextPrimary,
-            fontSize = titleFontSize,
-            fontWeight = FontWeight.SemiBold,
-            modifier = Modifier.offset(x = currentTitleX, y = currentTitleY)
+        // Top Bar
+        ExpressiveCollapsingTopBar(
+            progress = progress,
+            title = stringResource(id = R.string.title_info),
+            navigationIcon = NavigationIcon.Back(onBack = onBack)
         )
     }
 }

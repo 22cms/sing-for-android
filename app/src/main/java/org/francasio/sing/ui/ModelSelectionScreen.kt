@@ -1,6 +1,10 @@
 package org.francasio.sing.ui
 
 import androidx.compose.animation.core.Animatable
+import org.francasio.sing.ui.components.CollapsingTopBarDefaults
+import org.francasio.sing.ui.components.ExpressiveCollapsingTopBar
+import org.francasio.sing.ui.components.NavigationIcon
+import org.francasio.sing.ui.components.rememberCollapsingProgress
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
@@ -107,23 +111,8 @@ fun ModelSelectionScreen(
     val density = LocalDensity.current
 
     val statusBarTop = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
-    val pinnedTopBarHeight = 64.dp
-    val totalPinnedHeight = pinnedTopBarHeight + statusBarTop
-
-    val collapseRange = 110.dp
-    val collapseRangePx = with(density) { collapseRange.toPx() }
-    val progress = if (collapseRangePx > 0f) {
-        (scrollState.value.toFloat() / collapseRangePx).coerceIn(0f, 1f)
-    } else 0f
-
-    val subtitleAlpha = (1f - progress * 2.2f).coerceIn(0f, 1f)
-    val titleFontSize = (34f - 14f * progress).sp
-    val titleStartX = 20.dp
-    val titleEndX = 68.dp
-    val currentTitleX = titleStartX + (titleEndX - titleStartX) * progress
-    val titleStartY = statusBarTop + 86.dp
-    val titleEndY = statusBarTop + (pinnedTopBarHeight - 26.dp) / 2
-    val currentTitleY = titleStartY - (titleStartY - titleEndY) * progress
+    val totalPinnedHeight = CollapsingTopBarDefaults.PinnedTopBarHeight + statusBarTop
+    val progress = rememberCollapsingProgress(scrollState)
 
     val cardPositions = remember { mutableMapOf<String, Int>() }
     val highlightPulse = remember { Animatable(0f) }
@@ -224,92 +213,15 @@ fun ModelSelectionScreen(
             Spacer(modifier = Modifier.navigationBarsPadding())
         }
 
-        // Pinned Top Bar Background (fades in on scroll)
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(totalPinnedHeight)
-                .background(SurfaceDark.copy(alpha = progress * 0.96f))
-        ) {
-            if (progress > 0.05f) {
-                HorizontalDivider(
-                    color = DividerDark.copy(alpha = progress),
-                    modifier = Modifier.align(Alignment.BottomCenter)
-                )
-            }
-        }
-
-        // Dynamic Back Circle: starts big with ic_ai_models, shrinks and morphs to back arrow on scroll
-        val circleSize = 52.dp - (12.dp * progress)
-        val circleX = 20.dp - (4.dp * progress)
-        val circleStartY = statusBarTop + 24.dp
-        val circleEndY = statusBarTop + (pinnedTopBarHeight - 40.dp) / 2
-        val circleY = circleStartY + (circleEndY - circleStartY) * progress
-
-        Box(
-            modifier = Modifier
-                .offset(x = circleX, y = circleY)
-                .size(circleSize)
-                .clip(CircleShape)
-                .background(
-                    if (progress >= 0.5f) {
-                        SurfaceContainerHigh.copy(alpha = 0.7f + progress * 0.3f)
-                    } else {
-                        Primary.copy(alpha = 0.16f * (1f - progress))
-                    }
-                )
-                .clickable(onClick = onBack),
-            contentAlignment = Alignment.Center
-        ) {
-            if (progress < 0.6f) {
-                Icon(
-                    painter = painterResource(id = R.drawable.ic_ai_models),
-                    contentDescription = null,
-                    tint = Color.White,
-                    modifier = Modifier
-                        .size(28.dp)
-                        .graphicsLayer {
-                            alpha = (1f - progress * 2f).coerceIn(0f, 1f)
-                        }
-                )
-            }
-            if (progress > 0.4f) {
-                Icon(
-                    imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                    contentDescription = "Back",
-                    tint = Color.White,
-                    modifier = Modifier
-                        .size(20.dp)
-                        .graphicsLayer {
-                            alpha = ((progress - 0.4f) * 2.5f).coerceIn(0f, 1f)
-                        }
-                )
-            }
-        }
-
-        // Subtitle (fades out on scroll)
-        if (subtitleAlpha > 0f) {
-            Text(
-                text = stringResource(id = R.string.desc_model_selection),
-                color = TextSecondary.copy(alpha = subtitleAlpha),
-                fontSize = 13.5.sp,
-                lineHeight = 18.sp,
-                modifier = Modifier
-                    .offset(x = titleStartX, y = statusBarTop + 134.dp)
-                    .padding(end = 24.dp)
-                    .graphicsLayer {
-                        alpha = subtitleAlpha
-                    }
+        // Top Bar
+        ExpressiveCollapsingTopBar(
+            progress = progress,
+            title = stringResource(id = R.string.title_model_selection),
+            subtitle = stringResource(id = R.string.desc_model_selection),
+            navigationIcon = NavigationIcon.Morphing(
+                icon = painterResource(id = R.drawable.ic_ai_models),
+                onBack = onBack
             )
-        }
-
-        // Large Page Title (glides and shrinks into the pinned top bar)
-        Text(
-            text = stringResource(id = R.string.title_model_selection),
-            color = TextPrimary,
-            fontSize = titleFontSize,
-            fontWeight = FontWeight.SemiBold,
-            modifier = Modifier.offset(x = currentTitleX, y = currentTitleY)
         )
     }
 }
