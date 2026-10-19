@@ -20,10 +20,16 @@ if(CMAKE_ANDROID_ARCH_ABI STREQUAL "arm64-v8a" OR CMAKE_ANDROID_ARCH_ABI STREQUA
     set(MNN_BRIDGE mnn_bridge.cpp)
 endif()
 
+set(KISSFFT_DATATYPE "float" CACHE STRING "" FORCE)
+set(KISSFFT_STATIC ON CACHE BOOL "" FORCE)
+set(KISSFFT_TEST OFF CACHE BOOL "" FORCE)
+set(KISSFFT_TOOLS OFF CACHE BOOL "" FORCE)
+set(KISSFFT_PKGCONFIG OFF CACHE BOOL "" FORCE)
+add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/../../../../extern/kissfft ${CMAKE_CURRENT_BINARY_DIR}/kissfft EXCLUDE_FROM_ALL)
+
 add_library(sing_dsp SHARED
     stft_engine.cpp
     sinc_resampler.cpp
-    kiss_fft.c
     jni_bridge.cpp
     vinet_jni.cpp
     ${MNN_BRIDGE}
@@ -45,6 +51,7 @@ if(CMAKE_ANDROID_ARCH_ABI STREQUAL "arm64-v8a" OR CMAKE_ANDROID_ARCH_ABI STREQUA
 endif()
 
 target_link_libraries(sing_dsp
+    kissfft
     ${log-lib}
     dl
 )
