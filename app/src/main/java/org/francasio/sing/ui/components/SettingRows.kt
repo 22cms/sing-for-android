@@ -44,15 +44,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import org.francasio.sing.R
 import org.francasio.sing.provider.SingSettings
-import org.francasio.sing.ui.theme.LocalIsMaterialYou
-import org.francasio.sing.ui.theme.Primary
-import org.francasio.sing.ui.theme.PrimaryDark
-import org.francasio.sing.ui.theme.SurfaceContainerHigh
-import org.francasio.sing.ui.theme.TextPrimary
-import org.francasio.sing.ui.theme.TextSecondary
-import org.francasio.sing.ui.theme.getAccent1_200
-import org.francasio.sing.ui.theme.getAccent1_900
-import org.francasio.sing.ui.theme.getAccent2_900
+import org.francasio.sing.ui.theme.*
 
 @Composable
 fun SettingSwitchRow(
@@ -64,8 +56,6 @@ fun SettingSwitchRow(
     modifier: Modifier = Modifier
 ) {
     val isMaterialYou = LocalIsMaterialYou.current
-    val accent1_200 = getAccent1_200()
-    val accent1_900 = getAccent1_900()
 
     Row(
         modifier = modifier
@@ -110,7 +100,7 @@ fun SettingSwitchRow(
                         imageVector = Icons.Filled.Check,
                         contentDescription = null,
                         modifier = Modifier.size(SwitchDefaults.IconSize),
-                        tint = if (isMaterialYou) accent1_200 else PrimaryDark
+                        tint = if (isMaterialYou) Accent1_200 else PrimaryDark
                     )
                 } else {
                     Icon(
@@ -122,8 +112,8 @@ fun SettingSwitchRow(
                 }
             },
             colors = SwitchDefaults.colors(
-                checkedThumbColor = if (isMaterialYou) accent1_900 else Color.White,
-                checkedTrackColor = if (isMaterialYou) accent1_200 else Primary,
+                checkedThumbColor = if (isMaterialYou) Accent1_900 else Color.White,
+                checkedTrackColor = if (isMaterialYou) Accent1_200 else Primary,
                 checkedBorderColor = Color.Transparent,
                 uncheckedThumbColor = Color(0xFFB0B0B4),
                 uncheckedTrackColor = Color(0xFF2C2C32),
@@ -249,7 +239,7 @@ fun SettingHardwareTargetRow(
     }
     val effectiveTarget = if (hardwareTarget in targets) hardwareTarget else SingSettings.TARGET_NPU
     val isMaterialYou = LocalIsMaterialYou.current
-    val checkedTextColor = if (isMaterialYou) getAccent2_900() else Color.White
+    val checkedTextColor = if (isMaterialYou) Accent2_900 else Color.White
 
     Column(
         modifier = modifier

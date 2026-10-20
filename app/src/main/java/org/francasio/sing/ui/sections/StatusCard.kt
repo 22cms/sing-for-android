@@ -27,11 +27,7 @@ import androidx.compose.ui.unit.sp
 import org.francasio.sing.R
 import org.francasio.sing.ui.components.GroupedCardItem
 import org.francasio.sing.ui.components.StatusInfoRow
-import org.francasio.sing.ui.theme.LocalIsMaterialYou
-import org.francasio.sing.ui.theme.Primary
-import org.francasio.sing.ui.theme.TextPrimary
-import org.francasio.sing.ui.theme.TextSecondary
-import org.francasio.sing.ui.theme.getAccent2_900
+import org.francasio.sing.ui.theme.*
 import org.francasio.sing.util.ModelLoader
 
 @Composable
@@ -45,7 +41,6 @@ fun StatusCard(
     modifier: Modifier = Modifier
 ) {
     val isMaterialYou = LocalIsMaterialYou.current
-    val accent2_900 = getAccent2_900()
 
     Column(modifier = modifier.fillMaxWidth()) {
         // Module Status Item
@@ -76,7 +71,7 @@ fun StatusCard(
                             imageVector = if (isModuleLoaded) Icons.Outlined.CheckCircle else Icons.Outlined.Cancel,
                             contentDescription = null,
                             tint = if (isModuleLoaded) {
-                                if (isMaterialYou) accent2_900 else Primary
+                                if (isMaterialYou) Accent2_900 else Primary
                             } else {
                                 TextSecondary
                             },

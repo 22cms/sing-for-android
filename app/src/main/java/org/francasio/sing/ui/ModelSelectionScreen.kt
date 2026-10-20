@@ -71,16 +71,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.delay
 import org.francasio.sing.R
-import org.francasio.sing.ui.theme.BackgroundDark
-import org.francasio.sing.ui.theme.CardDark
-import org.francasio.sing.ui.theme.DividerDark
-import org.francasio.sing.ui.theme.Primary
-import org.francasio.sing.ui.theme.SurfaceContainerHigh
-import org.francasio.sing.ui.theme.SurfaceDark
-import org.francasio.sing.ui.theme.TextPrimary
-import org.francasio.sing.ui.theme.TextSecondary
-import org.francasio.sing.ui.theme.LocalIsMaterialYou
-import org.francasio.sing.ui.theme.getAccent2_900
+import org.francasio.sing.ui.theme.*
 import org.francasio.sing.util.DeviceHelper
 import org.francasio.sing.util.ModelDownloader
 import org.francasio.sing.util.ModelLoader
@@ -233,7 +224,6 @@ private fun StatusBadge(
     modifier: Modifier = Modifier
 ) {
     val isMaterialYou = LocalIsMaterialYou.current
-    val accent2_900 = getAccent2_900()
 
     val containerColor = when {
         !isPreferred -> SurfaceContainerHigh
@@ -243,7 +233,7 @@ private fun StatusBadge(
 
     val contentColor = when {
         !isPreferred -> TextSecondary
-        isMaterialYou -> accent2_900
+        isMaterialYou -> Accent2_900
         else -> Primary
     }
 

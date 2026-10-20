@@ -38,14 +38,7 @@ import org.francasio.sing.provider.SingSettings
 import org.francasio.sing.ui.BenchmarkUiState
 import org.francasio.sing.ui.components.PipelineSpecRow
 import org.francasio.sing.ui.components.SectionHeader
-import org.francasio.sing.ui.theme.CardDark
-import org.francasio.sing.ui.theme.DividerDark
-import org.francasio.sing.ui.theme.LocalIsMaterialYou
-import org.francasio.sing.ui.theme.Primary
-import org.francasio.sing.ui.theme.SurfaceContainerHigh
-import org.francasio.sing.ui.theme.TextPrimary
-import org.francasio.sing.ui.theme.TextSecondary
-import org.francasio.sing.ui.theme.getAccent2_900
+import org.francasio.sing.ui.theme.*
 import org.francasio.sing.util.DeviceHelper
 import org.francasio.sing.util.ModelLoader
 
@@ -62,7 +55,6 @@ fun PipelineDetailsCard(
     modifier: Modifier = Modifier
 ) {
     val isMaterialYou = LocalIsMaterialYou.current
-    val accent2_900 = getAccent2_900()
 
     Column(modifier = modifier.fillMaxWidth()) {
         SectionHeader(title = stringResource(id = R.string.title_engine_details))
@@ -100,7 +92,7 @@ fun PipelineDetailsCard(
 
                 Spacer(modifier = Modifier.height(16.dp))
 
-                val btnTextColor = if (isMaterialYou) accent2_900 else TextPrimary
+                val btnTextColor = if (isMaterialYou) Accent2_900 else TextPrimary
 
                 Button(
                     onClick = onRunBenchmark,
@@ -157,7 +149,7 @@ fun PipelineDetailsCard(
                         }
                         val badgeTextColor = when {
                             !isFast -> TextSecondary
-                            isMaterialYou -> accent2_900
+                            isMaterialYou -> Accent2_900
                             else -> Primary
                         }
                         Box(

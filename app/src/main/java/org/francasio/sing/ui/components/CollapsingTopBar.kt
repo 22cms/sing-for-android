@@ -47,12 +47,7 @@ import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.take
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import org.francasio.sing.ui.theme.DividerDark
-import org.francasio.sing.ui.theme.Primary
-import org.francasio.sing.ui.theme.SurfaceContainerHigh
-import org.francasio.sing.ui.theme.SurfaceDark
-import org.francasio.sing.ui.theme.TextPrimary
-import org.francasio.sing.ui.theme.TextSecondary
+import org.francasio.sing.ui.theme.*
 
 sealed interface NavigationIcon {
     data class Morphing(val icon: Painter, val onBack: () -> Unit) : NavigationIcon

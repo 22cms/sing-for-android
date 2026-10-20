@@ -30,9 +30,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import org.francasio.sing.R
-import org.francasio.sing.ui.theme.SurfaceContainerHigh
-import org.francasio.sing.ui.theme.TextPrimary
-import org.francasio.sing.ui.theme.TextSecondary
+import org.francasio.sing.ui.theme.*
 
 @OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable

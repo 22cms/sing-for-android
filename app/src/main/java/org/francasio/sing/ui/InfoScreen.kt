@@ -49,6 +49,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
@@ -58,15 +59,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import org.francasio.sing.R
-import org.francasio.sing.ui.theme.BackgroundDark
-import org.francasio.sing.ui.theme.CardDark
-import org.francasio.sing.ui.theme.DividerDark
-import org.francasio.sing.ui.theme.LocalIsMaterialYou
-import org.francasio.sing.ui.theme.Primary
-import org.francasio.sing.ui.theme.SurfaceContainerHigh
-import org.francasio.sing.ui.theme.SurfaceDark
-import org.francasio.sing.ui.theme.TextPrimary
-import org.francasio.sing.ui.theme.TextSecondary
+import org.francasio.sing.ui.theme.*
 
 private data class ThirdPartyProject(
     val name: String,
@@ -153,16 +146,27 @@ fun InfoScreen(
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
                     Box(
-                        modifier = Modifier
-                            .size(72.dp)
-                            .clip(CircleShape)
-                            .background(Primary.copy(alpha = 0.16f)),
+                        modifier = if (isMaterialYou) {
+                            Modifier
+                                .size(72.dp)
+                                .clip(CircleShape)
+                                .background(Neutral1_800)
+                        } else {
+                            Modifier
+                                .size(72.dp)
+                                .clip(CircleShape)
+                                .background(
+                                    Brush.verticalGradient(
+                                        colors = listOf(Color(0xFF222123), Color(0xFF101011))
+                                    )
+                                )
+                        },
                         contentAlignment = Alignment.Center
                     ) {
                         Icon(
                             painter = painterResource(id = R.drawable.ic_sing),
                             contentDescription = null,
-                            tint = Color.White,
+                            tint = if (isMaterialYou) Accent1_100 else Color.White,
                             modifier = Modifier.size(38.dp)
                         )
                     }
