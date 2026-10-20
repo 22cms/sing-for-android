@@ -29,6 +29,7 @@ object SingSettings {
     const val KEY_ALLOW_ZERO_FLOOR = "allow_zero_floor"
     const val KEY_FORCE_SONG_ELIGIBILITY = "force_song_eligibility"
     const val KEY_MATERIAL_YOU = "material_you"
+    const val KEY_BACK_TIP_LEARNED = "back_tip_learned"
     var isDebugOverride: Boolean? = null
 
     fun isDebug(context: Context?): Boolean {
@@ -107,6 +108,9 @@ object SingSettings {
     var materialYou: Boolean = true
 
     @Volatile
+    var backTipLearned: Boolean = false
+
+    @Volatile
     var lastHeartbeatTime: Long = 0L
 
     @Volatile
@@ -131,6 +135,7 @@ object SingSettings {
         allowZeroFloor = prefs.getBoolean(KEY_ALLOW_ZERO_FLOOR, false)
         forceSongEligibility = prefs.getBoolean(KEY_FORCE_SONG_ELIGIBILITY, false)
         materialYou = prefs.getBoolean(KEY_MATERIAL_YOU, true)
+        backTipLearned = prefs.getBoolean(KEY_BACK_TIP_LEARNED, false)
         lastHeartbeatTime = prefs.getLong(KEY_HEARTBEAT_TIME, 0L)
         lastHeartbeatManager = prefs.getString(KEY_HEARTBEAT_MANAGER, null)
         activeProvider = prefs.getString(KEY_ACTIVE_PROVIDER, "") ?: ""
@@ -211,7 +216,12 @@ object SingSettings {
             KEY_ALLOW_ZERO_FLOOR -> allowZeroFloor = value
             KEY_FORCE_SONG_ELIGIBILITY -> forceSongEligibility = value
             KEY_MATERIAL_YOU -> materialYou = value
+            KEY_BACK_TIP_LEARNED -> backTipLearned = value
         }
+    }
+
+    fun setBackTipLearned(context: Context, learned: Boolean = true) {
+        saveLocal(context, KEY_BACK_TIP_LEARNED, learned)
     }
 
     fun setMaterialYou(context: Context, enabled: Boolean) {

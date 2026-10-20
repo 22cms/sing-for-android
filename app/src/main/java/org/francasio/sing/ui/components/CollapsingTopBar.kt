@@ -36,6 +36,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.painter.Painter
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
@@ -47,6 +48,7 @@ import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.take
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import org.francasio.sing.provider.SingSettings
 import org.francasio.sing.ui.theme.*
 
 sealed interface NavigationIcon {
@@ -86,21 +88,22 @@ fun BoxScope.ExpressiveCollapsingTopBar(
     pinnedTopBarHeight: Dp = CollapsingTopBarDefaults.PinnedTopBarHeight,
     trailingAction: (@Composable BoxScope.(progress: Float) -> Unit)? = null
 ) {
+    val context = LocalContext.current
     val statusBarTop = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
     val totalPinnedHeight = pinnedTopBarHeight + statusBarTop
 
     val hasBackButton = navigationIcon is NavigationIcon.Morphing || navigationIcon is NavigationIcon.Back
-    val isCompactStyle = navigationIcon is NavigationIcon.Back && subtitle == null
     val hasBackButtonAndIcon = navigationIcon is NavigationIcon.Morphing
 
+    var isTipDisabled by remember { mutableStateOf(SingSettings.backTipLearned) }
     var animationPlayed by remember { mutableStateOf(false) }
     var animationCancelled by remember { mutableStateOf(false) }
     val animProgress = remember { Animatable(0f) }
 
-    val isSpawnAnimationRunning = hasBackButtonAndIcon && !animationPlayed && !animationCancelled && (progress <= 0.4f)
+    val isSpawnAnimationRunning = hasBackButtonAndIcon && !isTipDisabled && !animationPlayed && !animationCancelled && (progress <= 0.4f)
 
-    LaunchedEffect(hasBackButtonAndIcon) {
-        if (!hasBackButtonAndIcon || progress > 0.4f) {
+    LaunchedEffect(hasBackButtonAndIcon, isTipDisabled) {
+        if (!hasBackButtonAndIcon || isTipDisabled || progress > 0.4f) {
             animationCancelled = true
             return@LaunchedEffect
         }
@@ -143,7 +146,7 @@ fun BoxScope.ExpressiveCollapsingTopBar(
             }
     }
 
-    val startFontSize = if (isCompactStyle) 34f else 36f
+    val startFontSize = 36f
     val endFontSize = 20f
     val titleFontSize = (startFontSize - (startFontSize - endFontSize) * progress).sp
 
@@ -151,7 +154,7 @@ fun BoxScope.ExpressiveCollapsingTopBar(
     val titleEndX = if (hasBackButton) 68.dp else 20.dp
     val currentTitleX = titleStartX + (titleEndX - titleStartX) * progress
 
-    val titleStartY = statusBarTop + (if (isCompactStyle) 68.dp else 86.dp)
+    val titleStartY = statusBarTop + 86.dp
     val titleEndY = statusBarTop + (pinnedTopBarHeight - 28.dp) / 2
     val currentTitleY = titleStartY - (titleStartY - titleEndY) * progress
 
@@ -211,7 +214,13 @@ fun BoxScope.ExpressiveCollapsingTopBar(
                             Primary.copy(alpha = 0.16f * (1f - progress))
                         }
                     )
-                    .clickable(onClick = navigationIcon.onBack),
+                    .clickable {
+                        if (progress <= 0.05f && morphArrowAlpha <= 0.1f) {
+                            SingSettings.setBackTipLearned(context, true)
+                            isTipDisabled = true
+                        }
+                        navigationIcon.onBack()
+                    },
                 contentAlignment = Alignment.Center
             ) {
                 if (morphIconAlpha > 0.001f) {
@@ -245,16 +254,25 @@ fun BoxScope.ExpressiveCollapsingTopBar(
             }
         }
         is NavigationIcon.Back -> {
-            // Static compact back button pinned in top bar (InfoScreen style)
+            val circleSize = 52.dp - (12.dp * progress)
+            val circleX = 20.dp - (4.dp * progress)
+            val circleStartY = statusBarTop + 24.dp
+            val circleEndY = statusBarTop + (pinnedTopBarHeight - 40.dp) / 2
+            val circleY = circleStartY + (circleEndY - circleStartY) * progress
+            val arrowScale = circleSize / 40.dp
+
             Box(
                 modifier = Modifier
-                    .offset(
-                        x = 16.dp,
-                        y = statusBarTop + (pinnedTopBarHeight - 40.dp) / 2
-                    )
-                    .size(40.dp)
+                    .offset(x = circleX, y = circleY)
+                    .size(circleSize)
                     .clip(CircleShape)
-                    .background(SurfaceContainerHigh.copy(alpha = 0.7f + progress * 0.3f))
+                    .background(
+                        if (progress >= 0.5f) {
+                            SurfaceContainerHigh.copy(alpha = 0.7f + progress * 0.3f)
+                        } else {
+                            Primary.copy(alpha = 0.16f * (1f - progress))
+                        }
+                    )
                     .clickable(onClick = navigationIcon.onBack),
                 contentAlignment = Alignment.Center
             ) {
@@ -262,7 +280,12 @@ fun BoxScope.ExpressiveCollapsingTopBar(
                     imageVector = Icons.AutoMirrored.Filled.ArrowBack,
                     contentDescription = "Back",
                     tint = TextPrimary,
-                    modifier = Modifier.size(20.dp)
+                    modifier = Modifier
+                        .size(20.dp)
+                        .graphicsLayer {
+                            scaleX = arrowScale
+                            scaleY = arrowScale
+                        }
                 )
             }
         }
