@@ -1,0 +1,195 @@
+diff --git a/source/backend/nnapi/backend/NNAPIBackend.cpp b/source/backend/nnapi/backend/NNAPIBackend.cpp
+index 868d659..3c65cf2 100644
+--- a/source/backend/nnapi/backend/NNAPIBackend.cpp
++++ b/source/backend/nnapi/backend/NNAPIBackend.cpp
+@@ -46,7 +46,18 @@
+       const auto ENUM_TO_STR = NNAPIEnumToString(_status);              \
+       MNN_ERROR("[NNAPI] Error: %s when call " #func " at line %d.\n",  \
+                                         ENUM_TO_STR.c_str(), __LINE__); \
+-      exit(0); \
++      return;                                                           \
++    }                                                                   \
++  } while (0)
++
++#define CHECK_RET(ret_val, func, ...)                                   \
++  do {                                                                  \
++    const auto _status = (func(__VA_ARGS__));                           \
++    if (_status != ANEURALNETWORKS_NO_ERROR) {                          \
++      const auto ENUM_TO_STR = NNAPIEnumToString(_status);              \
++      MNN_ERROR("[NNAPI] Error: %s when call " #func " at line %d.\n",  \
++                                        ENUM_TO_STR.c_str(), __LINE__); \
++      return ret_val;                                                   \
+     }                                                                   \
+   } while (0)
+ 
+@@ -253,10 +264,10 @@ namespace MNN {
+     }
+ 
+     ErrorCode NNAPIBackend::onResizeEnd() {
+-        buildModel();
++        ErrorCode code = buildModel();
+         mHalfBuffer.clear();
+         mQuantCacheMap.clear();
+-        return NO_ERROR;
++        return code;
+     }
+     uint32_t NNAPIBackend::getTensorIdx(const Tensor* t, bool dequant) {
+         if (dequant) {
+@@ -418,7 +429,7 @@ namespace MNN {
+             for (auto i : dims) NNAPI_OP_LOG("%d, ", i);
+             NNAPI_OP_LOG("]\n}\n");
+         }
+-        CHECK(ANeuralNetworksModel_addOperand_27, mNNAPIModel, &operandType);
++        CHECK_RET(0, ANeuralNetworksModel_addOperand_27, mNNAPIModel, &operandType);
+         if (data && size) {
+             if (useFP16) {
+                 mHalfBuffer.emplace_back(new int16_t[size/2]);
+@@ -433,7 +444,7 @@ namespace MNN {
+                 quantParam.scales = scales;
+                 ANeuralNetworksModel_setOperandSymmPerChannelQuantParams_29(mNNAPIModel, operandIdx, &quantParam);
+             }
+-            CHECK(ANeuralNetworksModel_setOperandValue_27, mNNAPIModel, operandIdx, data, size);
++            CHECK_RET(0, ANeuralNetworksModel_setOperandValue_27, mNNAPIModel, operandIdx, data, size);
+         }
+         return operandIdx;
+     }
+@@ -449,7 +460,7 @@ namespace MNN {
+             NNAPI_OP_LOG("]\n}\n");
+         }
+         if (name) mOpNames.push_back(name);
+-        CHECK(ANeuralNetworksModel_addOperation_27,
++        CHECK_RET(NOT_SUPPORT, ANeuralNetworksModel_addOperation_27,
+               mNNAPIModel, op,
+               inputs.size(), inputs.data(),
+               outputs.size(), outputs.data());
+@@ -481,20 +492,25 @@ namespace MNN {
+             for (auto i : outputOperands) NNAPI_OP_LOG("%d, ", i);
+             NNAPI_OP_LOG("]\n}\n");
+         }
+-        CHECK(ANeuralNetworksModel_identifyInputsAndOutputs_27,
++        CHECK_RET(NOT_SUPPORT, ANeuralNetworksModel_identifyInputsAndOutputs_27,
+               mNNAPIModel,
+               inputOperands.size(),
+               inputOperands.data(),
+               outputOperands.size(),
+               outputOperands.data());
+-        CHECK(ANeuralNetworksModel_finish_27, mNNAPIModel);
++        CHECK_RET(NOT_SUPPORT, ANeuralNetworksModel_finish_27, mNNAPIModel);
+         std::unique_ptr<bool[]> supports(new bool[mOpNames.size()]);
+         int selectDeviceIdx = -1;
+         for (int i = 0; i < mNNAPIDevices.size(); i++) {
+             auto device = mNNAPIDevices[i].device;
+             auto name = mNNAPIDevices[i].name;
+             auto type = mNNAPIDevices[i].type;
+-            CHECK(ANeuralNetworksModel_getSupportedOperationsForDevices_29, mNNAPIModel, &device, 1, supports.get());
++            // Skip CPU reference devices (e.g. nnapi-reference) as they are CTS conformance emulators, not accelerators
++            if (type == ANEURALNETWORKS_DEVICE_CPU || (name && strstr(name, "reference") != nullptr)) {
++                NNAPI_DEVICE_LOG("[NNAPI] Skipping CPU reference device [%d : %s]\n", i, name ? name : "null");
++                continue;
++            }
++            CHECK_RET(NOT_SUPPORT, ANeuralNetworksModel_getSupportedOperationsForDevices_29, mNNAPIModel, &device, 1, supports.get());
+             NNAPI_DEVICE_LOG("[NNAPI] device [%d : %s] supportOps = {\n", i, name);
+             bool allsupport = true;
+             for (int i = 0; i < mOpNames.size(); i++) {
+@@ -509,11 +525,16 @@ namespace MNN {
+             }
+         }
+ 
++        if (selectDeviceIdx < 0) {
++            MNN_PRINT("[NNAPI] No suitable hardware accelerator found for NNAPI; rejecting\n");
++            return NOT_SUPPORT;
++        }
++
+         MNN_PRINT("[NNAPI] using device [%d : %s].\n", selectDeviceIdx, mNNAPIDevices[selectDeviceIdx].name);
+-        CHECK(ANeuralNetworksCompilation_createForDevices_29, mNNAPIModel, &mNNAPIDevices[selectDeviceIdx].device, 1, &mNNAPICompilation);
+-        CHECK(ANeuralNetworksCompilation_setPreference_27, mNNAPICompilation, ANEURALNETWORKS_PREFER_SUSTAINED_SPEED);
+-        CHECK(ANeuralNetworksCompilation_finish_27, mNNAPICompilation);
+-        CHECK(ANeuralNetworksBurst_create_29, mNNAPICompilation, &mNNAPIBurst);
++        CHECK_RET(NOT_SUPPORT, ANeuralNetworksCompilation_createForDevices_29, mNNAPIModel, &mNNAPIDevices[selectDeviceIdx].device, 1, &mNNAPICompilation);
++        CHECK_RET(NOT_SUPPORT, ANeuralNetworksCompilation_setPreference_27, mNNAPICompilation, ANEURALNETWORKS_PREFER_SUSTAINED_SPEED);
++        CHECK_RET(NOT_SUPPORT, ANeuralNetworksCompilation_finish_27, mNNAPICompilation);
++        CHECK_RET(NOT_SUPPORT, ANeuralNetworksBurst_create_29, mNNAPICompilation, &mNNAPIBurst);
+         return NO_ERROR;
+     }
+ 
+diff --git a/source/backend/qnn/backend/QNNBackend.cpp b/source/backend/qnn/backend/QNNBackend.cpp
+index c6d69e2..26bd120 100644
+--- a/source/backend/qnn/backend/QNNBackend.cpp
++++ b/source/backend/qnn/backend/QNNBackend.cpp
+@@ -3543,10 +3543,9 @@ void QnnBackend::addNodeToGraph(Qnn_OpConfigVersion_t version, const char* nodeN
+     const auto validationResult =
+         mRuntime->mQnnInterface.backendValidateOpConfig(
+             mRuntime->mQnnBackendHandle, opConfig);
+-    if ((!mUseHtpBackend || mRequireInt8Graph) &&
+-        validationResult != QNN_SUCCESS) {
++    if (validationResult != QNN_SUCCESS) {
+         MNN_ERROR(
+-            "MNN_QNN_INT8_NODE: validation failed backend=%s node=%s op=%s "
++            "MNN_QNN: validation failed backend=%s node=%s op=%s "
+             "code=%u inputs=%u outputs=%u\n",
+             mUseHtpBackend ? "HTP" : "DSP", nodeName, nodeType,
+             static_cast<unsigned int>(validationResult),
+@@ -3554,7 +3553,7 @@ void QnnBackend::addNodeToGraph(Qnn_OpConfigVersion_t version, const char* nodeN
+         for (uint32_t index = 0; index < opConfig.v1.numOfInputs; ++index) {
+             const Qnn_Tensor_t& tensor = opConfig.v1.inputTensors[index];
+             MNN_ERROR(
+-                "MNN_QNN_INT8_NODE: input[%u] name=%s type=%d dtype=%s\n",
++                "MNN_QNN: input[%u] name=%s type=%d dtype=%s\n",
+                 index,
+                 QNN_TENSOR_GET_NAME(tensor) != nullptr
+                     ? QNN_TENSOR_GET_NAME(tensor)
+@@ -3565,7 +3564,7 @@ void QnnBackend::addNodeToGraph(Qnn_OpConfigVersion_t version, const char* nodeN
+         for (uint32_t index = 0; index < opConfig.v1.numOfOutputs; ++index) {
+             const Qnn_Tensor_t& tensor = opConfig.v1.outputTensors[index];
+             MNN_ERROR(
+-                "MNN_QNN_INT8_NODE: output[%u] name=%s type=%d dtype=%s\n",
++                "MNN_QNN: output[%u] name=%s type=%d dtype=%s\n",
+                 index,
+                 QNN_TENSOR_GET_NAME(tensor) != nullptr
+                     ? QNN_TENSOR_GET_NAME(tensor)
+diff --git a/source/backend/qnn/execution/QNNPermute.cpp b/source/backend/qnn/execution/QNNPermute.cpp
+index 79e6e69..ba5cc3c 100644
+--- a/source/backend/qnn/execution/QNNPermute.cpp
++++ b/source/backend/qnn/execution/QNNPermute.cpp
+@@ -39,12 +39,38 @@ ErrorCode QNNPermute::onEncode(const std::vector<Tensor *> &inputs, const std::v
+             mapRaw[i] = (uint32_t)index;
+         }
+     } else {
+-        auto permutation = inputs[1]->host<int32_t>();
+-        for (int i = 0; i < dim; i++) {
+-            mapRaw[i] = (uint32_t)permutation[i];
++        if (inputs.size() > 1 && inputs[1] != nullptr) {
++            auto permutation = inputs[1]->host<int32_t>();
++            if (permutation != nullptr) {
++                for (int i = 0; i < dim; i++) {
++                    mapRaw[i] = (uint32_t)permutation[i];
++                }
++            } else {
++                MNN_ERROR("MNN_QNN: Transpose inputs[1]->host is null!\n");
++            }
++        } else {
++            MNN_ERROR("MNN_QNN: Transpose inputs.size() <= 1!\n");
+         }
+     }
++    std::string permStr = "";
++    for (auto p : mapRaw) permStr += std::to_string(p) + ",";
++    MNN_PRINT("MNN_QNN: Transpose dim=%d perm=[%s] inRank=%d\n", dim, permStr.c_str(), (int)inputs[0]->shape().size());
+     
++    if (dim == 4 && TensorUtils::getDescribe(inputs[0])->dimensionFormat == MNN_DATA_FORMAT_NC4HW4) {
++        const int nchw_to_nhwc[4] = {0, 3, 1, 2};
++        const int nhwc_to_nchw[4] = {0, 2, 3, 1};
++        std::vector<uint32_t> nhwcPerm(4);
++        for (int m = 0; m < 4; ++m) {
++            int nchw_axis = nhwc_to_nchw[m];
++            int src_nchw_axis = mapRaw[nchw_axis];
++            nhwcPerm[m] = (uint32_t)nchw_to_nhwc[src_nchw_axis];
++        }
++        MNN_PRINT("MNN_QNN: Transpose remap NC4HW4 perm from [%u,%u,%u,%u] to NHWC [%u,%u,%u,%u]\n",
++                  mapRaw[0], mapRaw[1], mapRaw[2], mapRaw[3],
++                  nhwcPerm[0], nhwcPerm[1], nhwcPerm[2], nhwcPerm[3]);
++        mapRaw = nhwcPerm;
++    }
++
+     this->createParamTensor("perm", QNN_DATATYPE_UINT_32, {(uint32_t) dim}, mapRaw.data());
+     this->addNodeCommon(inputs, outputs, 1, 1);
+     return NO_ERROR;

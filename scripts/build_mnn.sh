@@ -4,7 +4,7 @@ set -euo pipefail
 # Find Android NDK
 NDK_DIR="${ANDROID_NDK_HOME:-${ANDROID_NDK:-}}"
 if [ -z "$NDK_DIR" ] || [ ! -d "$NDK_DIR" ]; then
-    SDK_DIR="${ANDROID_HOME:-/home/fran/Android/Sdk}"
+    SDK_DIR="${ANDROID_HOME:-${HOME}/Android/Sdk}"
     if [ -d "$SDK_DIR/ndk" ]; then
         # Pick the latest installed NDK version
         NDK_DIR=$(find "$SDK_DIR/ndk" -maxdepth 1 -mindepth 1 -type d | sort -V | tail -n 1)
@@ -32,13 +32,35 @@ else
     echo "MNN repository already cloned at $MNN_REPO_DIR"
 fi
 
+# Apply MNN patches (crash-free NNAPI, layout-aware QNN transpose)
+if [ -f "$SCRIPT_DIR/mnn_patches.patch" ]; then
+    if git -C "$MNN_REPO_DIR" apply --check "$SCRIPT_DIR/mnn_patches.patch" 2>/dev/null; then
+        echo "Applying patches to MNN..."
+        git -C "$MNN_REPO_DIR" apply "$SCRIPT_DIR/mnn_patches.patch"
+    else
+        echo "MNN patches already applied."
+    fi
+fi
+
+# Fetch QNN SDK dependencies for Qualcomm Hexagon HTP acceleration
+if [ ! -d "${MNN_REPO_DIR}/source/backend/qnn/3rdParty/lib/arm64-v8a" ]; then
+    echo "Preparing QNN SDK dependencies for MNN..."
+    if [ -f "${MNN_REPO_DIR}/prepare_qnn_deps.sh" ]; then
+        bash "${MNN_REPO_DIR}/prepare_qnn_deps.sh"
+    fi
+fi
+
 build_abi() {
     local ABI="$1"
     local BUILD_DIR="${WORK_DIR}/build_${ABI}"
     echo "=== Building MNN for ${ABI} ==="
-    rm -rf "$BUILD_DIR"
     mkdir -p "$BUILD_DIR"
     pushd "$BUILD_DIR" >/dev/null
+
+    local QNN_FLAG="OFF"
+    if [ "$ABI" = "arm64-v8a" ]; then
+        QNN_FLAG="ON"
+    fi
 
     cmake "$MNN_REPO_DIR" \
         -DCMAKE_TOOLCHAIN_FILE="$NDK_DIR/build/cmake/android.toolchain.cmake" \
@@ -48,7 +70,8 @@ build_abi() {
         -DCMAKE_BUILD_TYPE=Release \
         -DMNN_BUILD_SHARED_LIBS=ON \
         -DMNN_SEP_BUILD=OFF \
-        -DMNN_QNN=OFF \
+        -DMNN_QNN="$QNN_FLAG" \
+        -DQNN_SDK_ROOT="${MNN_REPO_DIR}/source/backend/qnn/3rdParty" \
         -DMNN_NNAPI=ON \
         -DMNN_OPENCL=ON \
         -DMNN_VULKAN=ON \

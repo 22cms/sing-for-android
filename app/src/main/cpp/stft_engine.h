@@ -4,7 +4,14 @@
 #include <cmath>
 #include <complex>
 #include <cstdint>
+#include <queue>
+#include <thread>
+#include <mutex>
+#include <condition_variable>
+#include <atomic>
+#include <functional>
 #include "kiss_fft.h"
+#include "kiss_fftr.h"
 
 namespace sing {
 
@@ -22,6 +29,7 @@ constexpr int TENSOR_CHANNELS = 4; // Re_L, Im_L, Re_R, Im_R
 constexpr int TENSOR_SIZE = TENSOR_CHANNELS * N_BINS * N_FRAMES; // 2,097,152 floats (dim_f = 2048)
 constexpr int MAX_TENSOR_SIZE = TENSOR_CHANNELS * MAX_N_BINS * N_FRAMES; // 3,145,728 floats (dim_f = 3072)
 constexpr float COMPENSATION = 1.035f; // UVR MDX-Net 1 compensation factor
+constexpr int NUM_STFT_WORKERS = 4;
 
 class StftEngine {
 public:
@@ -47,16 +55,28 @@ private:
     std::vector<float> window_;
     std::vector<float> ola_inv_norm_;
 
-    std::vector<float> padded_input_;
-    std::vector<float> padded_output_;
+    std::vector<float> padded_input_[2];
 
-    kiss_fft_cfg cfg_forward_{nullptr};
-    kiss_fft_cfg cfg_inverse_{nullptr};
+    kiss_fftr_cfg cfgs_forward_[NUM_STFT_WORKERS]{};
+    kiss_fftr_cfg cfgs_inverse_[NUM_STFT_WORKERS]{};
 
-    std::vector<kiss_fft_cpx> fft_in_;
-    std::vector<kiss_fft_cpx> fft_out_;
+    std::vector<float> worker_fin_r_[NUM_STFT_WORKERS];
+    std::vector<kiss_fft_cpx> worker_fout_c_[NUM_STFT_WORKERS];
+    std::vector<kiss_fft_cpx> worker_fin_c_[NUM_STFT_WORKERS];
+    std::vector<float> worker_fout_r_[NUM_STFT_WORKERS];
+    std::vector<float> worker_padded_out_[NUM_STFT_WORKERS];
+
+    std::vector<std::thread> workers_;
+    std::queue<std::function<void()>> tasks_;
+    std::mutex queue_mutex_;
+    std::condition_variable cv_task_;
+    std::condition_variable cv_done_;
+    std::atomic<int> active_tasks_{0};
+    bool stop_{false};
 
     void init_tables();
+    void submit(std::function<void()> task);
+    void wait_all();
 };
 
 } // namespace sing
