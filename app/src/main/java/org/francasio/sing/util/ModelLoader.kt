@@ -29,6 +29,18 @@ object ModelLoader {
     private const val HUGGINGFACE_MODELS_BASE_URL =
         "https://huggingface.co/Francasio/sing-android-weights-db/resolve/main"
 
+    /**
+     * True if ONNXRuntime is bundled into this build (i.e. ai.onnxruntime classes are present).
+     */
+    val isOnnxRuntimeAvailable: Boolean by lazy {
+        try {
+            Class.forName("ai.onnxruntime.OrtEnvironment")
+            true
+        } catch (_: Throwable) {
+            false
+        }
+    }
+
     fun getJsonDownloadUrls(context: Context?): List<String> {
         val isDebug = SingSettings.isDebug(context)
         return if (isDebug) {
@@ -195,6 +207,10 @@ object ModelLoader {
             val str = file.readText()
             val obj = JSONObject(str)
             val engine = obj.optString("engine", SingSettings.ENGINE_ONNX)
+            if (!isOnnxRuntimeAvailable && engine.equals(SingSettings.ENGINE_ONNX, ignoreCase = true)) {
+                Log.w(TAG, "Selected model ${obj.optString("id")} uses ONNX, but ONNXRuntime is not available in this build")
+                return null
+            }
             val precision = obj.optString("precision", "FP16")
             val isRecommended = obj.optBoolean("isRecommended", isVersionRecommended(engine, precision))
             val info = ModelInfo(
@@ -260,7 +276,7 @@ object ModelLoader {
         if (engine.equals(SingSettings.ENGINE_NATIVE, ignoreCase = true)) {
             return false
         }
-        return if (DeviceHelper.isQualcommWithHexagonHtp) {
+        return if (DeviceHelper.isQualcommWithHexagonHtp && isOnnxRuntimeAvailable) {
             engine.equals(SingSettings.ENGINE_ONNX, ignoreCase = true) && precision.equals("FP16", ignoreCase = true)
         } else {
             engine.equals(SingSettings.ENGINE_MNN, ignoreCase = true) && precision.equals("FP16", ignoreCase = true)
@@ -305,6 +321,10 @@ object ModelLoader {
                     // faster than the CPU ONNX path. Drop any lingering LiteRT variant
                     // here so stale catalogs also stop surfacing it in the picker.
                     if (engine.equals(SingSettings.ENGINE_LITERT, ignoreCase = true)) continue
+
+                    // Drop ONNX models/versions if this build does not bundle ONNX Runtime
+                    if (!isOnnxRuntimeAvailable && engine.equals(SingSettings.ENGINE_ONNX, ignoreCase = true)) continue
+
                     val precision = vObj.optString("precision", "FP16")
                     val fileName = vObj.getString("fileName")
                     val fileSizeDesc = vObj.optString("fileSizeDesc", "")
@@ -353,27 +373,29 @@ object ModelLoader {
                 }
             }
 
-            defs.add(
-                ModelDefinition(
-                    id = mId,
-                    displayName = mDisplayName,
-                    targetStem = targetStem,
-                    networkType = networkType,
-                    sampleRate = sampleRate,
-                    blockSize = blockSize,
-                    lookaheadSize = lookaheadSize,
-                    numBins = numBins,
-                    numFrames = numFrames,
-                    fftSize = fftSize,
-                    hopSize = hopSize,
-                    chunkSamples = chunkSamples,
-                    crossfadeSamples = crossfadeSamples,
-                    hopSamples = hopSamples,
-                    description = description,
-                    isDefault = isDefault,
-                    versions = versionsList
+            if (versionsList.isNotEmpty()) {
+                defs.add(
+                    ModelDefinition(
+                        id = mId,
+                        displayName = mDisplayName,
+                        targetStem = targetStem,
+                        networkType = networkType,
+                        sampleRate = sampleRate,
+                        blockSize = blockSize,
+                        lookaheadSize = lookaheadSize,
+                        numBins = numBins,
+                        numFrames = numFrames,
+                        fftSize = fftSize,
+                        hopSize = hopSize,
+                        chunkSamples = chunkSamples,
+                        crossfadeSamples = crossfadeSamples,
+                        hopSamples = hopSamples,
+                        description = description,
+                        isDefault = isDefault,
+                        versions = versionsList
+                    )
                 )
-            )
+            }
         }
         dropRetiredViNNetVersions(defs, infos)
         val vinnetDef = defs.find { it.id == "apple_sing" }
@@ -645,6 +667,10 @@ object ModelLoader {
                 activeProviderName = mnn.providerName
                 mnn
             } else {
+                if (!isOnnxRuntimeAvailable) {
+                    Log.e(TAG, "Cannot initialize ONNX inference backend for ${modelInfo.id}: ONNXRuntime is not included in this build")
+                    return null
+                }
                 Log.i(TAG, "Initializing ONNX inference backend for ${modelInfo.id} (${modelFile.name}, target=$hardwareTarget)...")
                 val onnx = OnnxBackendFactory.createBackend(
                     context,
@@ -678,6 +704,10 @@ object ModelLoader {
     }
 
     fun registerDynamicModel(info: ModelInfo) {
+        if (!isOnnxRuntimeAvailable && info.isOnnx) {
+            Log.d(TAG, "Skipping registration of dynamic ONNX model ${info.id}: ONNXRuntime not available")
+            return
+        }
         dynamicModels[info.id] = info
         synchronized(catalogLock) {
             val list = AVAILABLE_MODELS.toMutableList()

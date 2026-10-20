@@ -103,10 +103,25 @@ fun ModelSelectionScreen(
     val cardPositions = remember { mutableMapOf<String, Int>() }
     val highlightPulse = remember { Animatable(0f) }
 
-    LaunchedEffect(scrollToSelected, modelDefinitions.size) {
-        if (scrollToSelected && modelDefinitions.isNotEmpty()) {
+    val visibleModelDefinitions = remember(modelDefinitions.toList()) {
+        if (ModelLoader.isOnnxRuntimeAvailable) {
+            modelDefinitions.toList()
+        } else {
+            modelDefinitions.mapNotNull { modelDef ->
+                val nonOnnxVersions = modelDef.versions.filter { !it.engine.equals(SingSettings.ENGINE_ONNX, ignoreCase = true) }
+                if (nonOnnxVersions.isNotEmpty()) {
+                    modelDef.copy(versions = nonOnnxVersions)
+                } else {
+                    null
+                }
+            }
+        }
+    }
+
+    LaunchedEffect(scrollToSelected, visibleModelDefinitions.size) {
+        if (scrollToSelected && visibleModelDefinitions.isNotEmpty()) {
             delay(150)
-            val targetDef = modelDefinitions.find { it.versions.any { v -> v.id == selectedModelId } || it.id == selectedModelId }
+            val targetDef = visibleModelDefinitions.find { it.versions.any { v -> v.id == selectedModelId } || it.id == selectedModelId }
             if (targetDef != null) {
                 val y = cardPositions[targetDef.id]
                 if (y != null) {
@@ -136,7 +151,7 @@ fun ModelSelectionScreen(
             Spacer(modifier = Modifier.height(statusBarTop + 196.dp))
 
             // Split by Models First: Render a separate Card for each Model Definition
-            modelDefinitions.forEach { modelDef ->
+            visibleModelDefinitions.forEach { modelDef ->
                 val isSelectedGroup = modelDef.versions.any { it.id == selectedModelId } || modelDef.id == selectedModelId
                 Box(
                     modifier = Modifier
@@ -366,7 +381,7 @@ private fun ModelVersionRow(
     val isQualcomm = remember { DeviceHelper.isQualcommWithHexagonHtp }
     val isEnginePreferred = when {
         modelInfo.isViNNet -> true
-        isQualcomm -> modelInfo.engine == SingSettings.ENGINE_ONNX
+        isQualcomm && ModelLoader.isOnnxRuntimeAvailable -> modelInfo.engine == SingSettings.ENGINE_ONNX
         else -> modelInfo.engine == SingSettings.ENGINE_MNN
     }
     val isPrecisionPreferred = modelInfo.precision.equals("fp16", ignoreCase = true) ||

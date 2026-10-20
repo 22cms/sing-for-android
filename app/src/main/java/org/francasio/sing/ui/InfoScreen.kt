@@ -87,33 +87,45 @@ fun InfoScreen(
 
     val isMaterialYou = LocalIsMaterialYou.current
 
-    val thirdPartyProjects = listOf(
-        ThirdPartyProject(
-            name = "ONNX Runtime & QNN Execution Provider",
-            authors = "Microsoft Corporation & Qualcomm Technologies",
-            description = "Neural network inference with Qualcomm Hexagon HTP NPU hardware acceleration and multithreaded CPU fallback."
-        ),
-        ThirdPartyProject(
-            name = "Alibaba MNN",
-            authors = "Alibaba Group",
-            description = "Lightweight deep learning engine for cross-platform GPU, NNAPI, and multi-core CPU execution."
-        ),
-        ThirdPartyProject(
-            name = "SF Symbols",
-            authors = "Apple Inc.",
-            description = "Iconography and glyph styling inspired by Apple system design language."
-        ),
-        ThirdPartyProject(
-            name = "MDX-Net & Ultimate Vocal Remover",
-            authors = "KimberleyJSN & UVR Development Team",
-            description = "Vocal and instrumental stem separation model weights."
-        ),
-        ThirdPartyProject(
-            name = "KISS FFT",
-            authors = "Mark Borgerding (mborgerding)",
-            description = "Fast Fourier Transform (FFT) library that tries to Keep It Simple, Stupid"
-        ),
-    )
+    val thirdPartyProjects = buildList {
+        if (org.francasio.sing.util.ModelLoader.isOnnxRuntimeAvailable) {
+            add(
+                ThirdPartyProject(
+                    name = "ONNX Runtime & QNN Execution Provider",
+                    authors = "Microsoft Corporation & Qualcomm Technologies",
+                    description = "Neural network inference with Qualcomm Hexagon HTP NPU hardware acceleration and multithreaded CPU fallback."
+                )
+            )
+        }
+        add(
+            ThirdPartyProject(
+                name = "Alibaba MNN",
+                authors = "Alibaba Group",
+                description = "Lightweight deep learning engine for cross-platform GPU, NNAPI, and multi-core CPU execution."
+            )
+        )
+        add(
+            ThirdPartyProject(
+                name = "SF Symbols",
+                authors = "Apple Inc.",
+                description = "Iconography and glyph styling inspired by Apple system design language."
+            )
+        )
+        add(
+            ThirdPartyProject(
+                name = "MDX-Net & Ultimate Vocal Remover",
+                authors = "KimberleyJSN & UVR Development Team",
+                description = "Vocal and instrumental stem separation model weights."
+            )
+        )
+        add(
+            ThirdPartyProject(
+                name = "KISS FFT",
+                authors = "Mark Borgerding (mborgerding)",
+                description = "Fast Fourier Transform (FFT) library that tries to Keep It Simple, Stupid"
+            )
+        )
+    }
 
     Box(
         modifier = Modifier
