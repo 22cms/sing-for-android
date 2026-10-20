@@ -51,15 +51,30 @@ if [ ! -d "${MNN_REPO_DIR}/source/backend/qnn/3rdParty/lib/arm64-v8a" ]; then
 fi
 
 build_abi() {
-    local ABI="$1"
+    local RAW_ABI="$1"
+    local ABI
+    case "$RAW_ABI" in
+        arm32|armv7|armeabi) ABI="armeabi-v7a" ;;
+        arm64|aarch64) ABI="arm64-v8a" ;;
+        x86-64|x86_64|amd64|x64) ABI="x86_64" ;;
+        x86|i686) ABI="x86" ;;
+        *) ABI="$RAW_ABI" ;;
+    esac
+
     local BUILD_DIR="${WORK_DIR}/build_${ABI}"
     echo "=== Building MNN for ${ABI} ==="
     mkdir -p "$BUILD_DIR"
     pushd "$BUILD_DIR" >/dev/null
 
     local QNN_FLAG="OFF"
+    local ARM82_FLAG="OFF"
+    local AVX2_FLAG="OFF"
+
     if [ "$ABI" = "arm64-v8a" ]; then
         QNN_FLAG="ON"
+        ARM82_FLAG="ON"
+    elif [ "$ABI" = "x86_64" ] || [ "$ABI" = "x86" ]; then
+        AVX2_FLAG="ON"
     fi
 
     cmake "$MNN_REPO_DIR" \
@@ -75,7 +90,8 @@ build_abi() {
         -DMNN_NNAPI=ON \
         -DMNN_OPENCL=ON \
         -DMNN_VULKAN=ON \
-        -DMNN_ARM82=ON \
+        -DMNN_ARM82="$ARM82_FLAG" \
+        -DMNN_AVX2="$AVX2_FLAG" \
         -DMNN_BUILD_CONVERTER=OFF \
         -DMNN_BUILD_TOOLS=OFF \
         -DMNN_BUILD_TEST=OFF \
@@ -106,9 +122,18 @@ build_abi() {
     echo "Installed libMNN.so -> $OUT_DIR/libMNN.so ($(ls -lh "$OUT_DIR/libMNN.so" | awk '{print $5}'))"
 }
 
-# Build for arm64-v8a (primary) and armeabi-v7a
-build_abi "arm64-v8a"
-build_abi "armeabi-v7a"
+# Target ABIs: arm64-v8a (primary 64-bit ARM), armeabi-v7a (32-bit ARM), and x86_64 (64-bit x86)
+# Pass specific ABI(s) as script arguments (e.g. ./build_mnn.sh arm32 x86-64) or build all by default
+DEFAULT_ABIS=("arm64-v8a" "armeabi-v7a" "x86_64")
+if [ $# -gt 0 ]; then
+    for target in "$@"; do
+        build_abi "$target"
+    done
+else
+    for abi in "${DEFAULT_ABIS[@]}"; do
+        build_abi "$abi"
+    done
+fi
 
 # Update include headers
 echo "Updating MNN headers..."
