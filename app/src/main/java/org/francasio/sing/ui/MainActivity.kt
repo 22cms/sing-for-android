@@ -64,6 +64,27 @@ class MainActivity : ComponentActivity() {
     private val selectedModelIdState = mutableStateOf(SingSettings.DEFAULT_MODEL_ID)
     private val currentScreenState = mutableStateOf(AppScreen.MAIN)
     private val openedFromMusicState = mutableStateOf(false)
+    private val preserveSideState = mutableStateOf(false)
+    private val twoWaySliderState = mutableStateOf(false)
+    private val allowZeroFloorState = mutableStateOf(false)
+    private val forceSongEligibilityState = mutableStateOf(false)
+    private val ecoModeState = mutableStateOf(true)
+    private val hardwareTargetState = mutableStateOf(SingSettings.TARGET_NPU)
+    private val threadCountState = mutableIntStateOf(4)
+    private val materialYouState = mutableStateOf(true)
+    private val benchmarkState = mutableStateOf(BenchmarkUiState())
+
+    private fun syncUiStatesWithSettings() {
+        selectedModelIdState.value = SingSettings.selectedModelId
+        preserveSideState.value = SingSettings.preserveSide
+        twoWaySliderState.value = SingSettings.twoWaySlider
+        allowZeroFloorState.value = SingSettings.allowZeroFloor
+        forceSongEligibilityState.value = SingSettings.forceSongEligibility
+        ecoModeState.value = SingSettings.ecoMode
+        hardwareTargetState.value = SingSettings.hardwareTarget
+        threadCountState.intValue = SingSettings.threadCount.coerceIn(1, 12)
+        materialYouState.value = SingSettings.materialYou
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         androidx.appcompat.app.AppCompatDelegate.setDefaultNightMode(androidx.appcompat.app.AppCompatDelegate.MODE_NIGHT_YES)
@@ -76,7 +97,7 @@ class MainActivity : ComponentActivity() {
 
         SingSettings.loadLocal(this)
         ModelLoader.loadModels(this)
-        selectedModelIdState.value = SingSettings.selectedModelId
+        syncUiStatesWithSettings()
         bgExecutor.execute {
             ModelLoader.refreshModels(this)
         }
@@ -91,22 +112,21 @@ class MainActivity : ComponentActivity() {
             }
         }
 
-        var preserveSide by mutableStateOf(SingSettings.preserveSide)
-        var twoWaySlider by mutableStateOf(SingSettings.twoWaySlider)
-        var allowZeroFloor by mutableStateOf(SingSettings.allowZeroFloor)
-        var forceSongEligibility by mutableStateOf(SingSettings.forceSongEligibility)
-        var ecoMode by mutableStateOf(SingSettings.ecoMode)
-        var hardwareTarget by mutableStateOf(SingSettings.hardwareTarget)
-        var threadCount by mutableIntStateOf(SingSettings.threadCount.coerceIn(1, 12))
-        var benchmarkState by mutableStateOf(BenchmarkUiState())
-        var materialYou by mutableStateOf(SingSettings.materialYou)
-
         setContent {
             val isModuleLoaded by isModuleLoadedState
             val xposedManagerInfo by xposedManagerInfoState
             val selectedModelId by selectedModelIdState
             val currentScreen by currentScreenState
             val openedFromMusic by openedFromMusicState
+            val preserveSide by preserveSideState
+            val twoWaySlider by twoWaySliderState
+            val allowZeroFloor by allowZeroFloorState
+            val forceSongEligibility by forceSongEligibilityState
+            val ecoMode by ecoModeState
+            val hardwareTarget by hardwareTargetState
+            val threadCount by threadCountState
+            val materialYou by materialYouState
+            val currentBenchmarkState by benchmarkState
 
             var scrollToSelectedOnOpen by remember { mutableStateOf(false) }
             var backProgress by remember { mutableFloatStateOf(0f) }
@@ -187,46 +207,41 @@ class MainActivity : ComponentActivity() {
                         hardwareTarget = hardwareTarget,
                         selectedModelId = selectedModelId,
                         threadCount = threadCount,
-                        benchmarkState = benchmarkState,
-                        activeProvider = if (benchmarkState.result?.provider?.isNotBlank() == true) benchmarkState.result!!.provider else SingSettings.activeProvider,
+                        benchmarkState = currentBenchmarkState,
+                        activeProvider = if (currentBenchmarkState.result?.provider?.isNotBlank() == true) currentBenchmarkState.result!!.provider else SingSettings.activeProvider,
                         openedFromMusic = openedFromMusic,
                         onPreserveSideChange = { isChecked ->
-                            preserveSide = isChecked
+                            preserveSideState.value = isChecked
                             SingSettings.saveLocal(this@MainActivity, SingSettings.KEY_PRESERVE_SIDE, isChecked)
                             SingSettings.broadcastSettings(this@MainActivity)
                         },
                         onTwoWaySliderChange = { isChecked ->
-                            twoWaySlider = isChecked
+                            twoWaySliderState.value = isChecked
                             SingSettings.saveLocal(this@MainActivity, SingSettings.KEY_TWO_WAY_SLIDER, isChecked)
                             SingSettings.broadcastSettings(this@MainActivity)
                         },
                         onAllowZeroFloorChange = { isChecked ->
-                            allowZeroFloor = isChecked
+                            allowZeroFloorState.value = isChecked
                             SingSettings.saveLocal(this@MainActivity, SingSettings.KEY_ALLOW_ZERO_FLOOR, isChecked)
                             SingSettings.broadcastSettings(this@MainActivity)
                         },
                         onForceSongEligibilityChange = { isChecked ->
-                            forceSongEligibility = isChecked
+                            forceSongEligibilityState.value = isChecked
                             SingSettings.saveLocal(this@MainActivity, SingSettings.KEY_FORCE_SONG_ELIGIBILITY, isChecked)
                             SingSettings.broadcastSettings(this@MainActivity)
                         },
                         onEcoModeChange = { isChecked ->
-                            ecoMode = isChecked
+                            ecoModeState.value = isChecked
                             SingSettings.saveLocal(this@MainActivity, SingSettings.KEY_ECO_MODE, isChecked)
                             SingSettings.broadcastSettings(this@MainActivity)
                         },
                         onHardwareTargetChange = { target ->
-                            hardwareTarget = target
+                            hardwareTargetState.value = target
                             SingSettings.saveLocalString(this@MainActivity, SingSettings.KEY_HARDWARE_TARGET, target)
                             SingSettings.broadcastSettings(this@MainActivity)
                         },
-                        onModelSelect = { modelId ->
-                            selectedModelIdState.value = modelId
-                            SingSettings.saveLocalString(this@MainActivity, SingSettings.KEY_SELECTED_MODEL, modelId)
-                            SingSettings.broadcastSettings(this@MainActivity)
-                        },
                         onThreadCountChange = { threads ->
-                            threadCount = threads
+                            threadCountState.intValue = threads
                             SingSettings.saveLocalInt(this@MainActivity, SingSettings.KEY_THREAD_COUNT, threads)
                             SingSettings.broadcastSettings(this@MainActivity)
                         },
@@ -248,14 +263,14 @@ class MainActivity : ComponentActivity() {
                         },
                         onRunBenchmark = {
                             if (selectedModelId.isEmpty()) return@MainScreen
-                            benchmarkState = benchmarkState.copy(isRunning = true)
+                            benchmarkState.value = benchmarkState.value.copy(isRunning = true)
                             val currentThreads = threadCount
                             val currentTarget = hardwareTarget
                             val currentModelId = selectedModelId
                             bgExecutor.execute {
                                 runBenchmark(currentThreads, currentTarget, currentModelId) { rtf, totalMs, stftMs, nnMs, istftMs, provider ->
                                     runOnUiThread {
-                                        benchmarkState = BenchmarkUiState(
+                                        benchmarkState.value = BenchmarkUiState(
                                             isRunning = false,
                                             result = BenchmarkResult(
                                                 rtf = rtf,
@@ -317,10 +332,10 @@ class MainActivity : ComponentActivity() {
                                 onModelSelect = { modelId ->
                                     selectedModelIdState.value = modelId
                                     SingSettings.saveLocalString(this@MainActivity, SingSettings.KEY_SELECTED_MODEL, modelId)
-                                    val info = ModelLoader.getModelInfo(modelId)
+                                    val info = ModelLoader.findCatalogModel(modelId)
                                     if (info?.engine?.equals(SingSettings.ENGINE_ONNX, ignoreCase = true) == true) {
-                                        if (hardwareTarget != SingSettings.TARGET_NPU && hardwareTarget != SingSettings.TARGET_CPU) {
-                                            hardwareTarget = SingSettings.TARGET_NPU
+                                        if (hardwareTargetState.value != SingSettings.TARGET_NPU && hardwareTargetState.value != SingSettings.TARGET_CPU) {
+                                            hardwareTargetState.value = SingSettings.TARGET_NPU
                                             SingSettings.saveLocalString(this@MainActivity, SingSettings.KEY_HARDWARE_TARGET, SingSettings.TARGET_NPU)
                                         }
                                     }
@@ -368,7 +383,7 @@ class MainActivity : ComponentActivity() {
                             InfoScreen(
                                 materialYou = materialYou,
                                 onToggleMaterialYou = { enabled ->
-                                    materialYou = enabled
+                                    materialYouState.value = enabled
                                     SingSettings.setMaterialYou(this@MainActivity, enabled)
                                 },
                                 onBack = {
@@ -513,7 +528,7 @@ class MainActivity : ComponentActivity() {
     override fun onResume() {
         super.onResume()
         SingSettings.loadLocal(this)
-        selectedModelIdState.value = SingSettings.selectedModelId
+        syncUiStatesWithSettings()
         isModuleLoadedState.value = XposedStatus.isModuleActive(this)
         xposedManagerInfoState.value = XposedStatus.getEffectiveManagerInfo(this)
         checkRunBenchmarkIntent(intent)

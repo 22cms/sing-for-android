@@ -50,6 +50,8 @@ private class ExactSizeDrawable(
     }
     override fun setAlpha(alpha: Int) { delegate.alpha = alpha }
     override fun setColorFilter(colorFilter: ColorFilter?) { delegate.colorFilter = colorFilter }
+    @Deprecated("Deprecated in Java", ReplaceWith("PixelFormat.UNKNOWN", "android.graphics.PixelFormat"))
+    @Suppress("DEPRECATION")
     override fun getOpacity(): Int = delegate.opacity
     override fun onBoundsChange(bounds: Rect) {
         super.onBoundsChange(bounds)
@@ -968,6 +970,7 @@ class SingXposedEntry : XposedModule() {
                                 cl
                             )
                             if (audioProcessorClass != null) {
+                                @Suppress("UNCHECKED_CAST")
                                 val newArray = java.lang.reflect.Array.newInstance(audioProcessorClass, 1) as Array<Any>
                                 newArray[0] = vocalsProcessor
                                 logInfo("SVAudioRendererV2.createAudioProcessors filtered to [VocalsAudioProcessor] only")
@@ -1024,6 +1027,7 @@ class SingXposedEntry : XposedModule() {
                                 val floatResampler = toFloatProcessors?.firstOrNull { it != null && it.javaClass.name.contains("FloatResamplingAudioProcessor") }
                                 val audioProcessorClass = ReflectionUtils.findClass("com.google.android.exoplayer2.audio.AudioProcessor", cl)
                                 if (audioProcessorClass != null) {
+                                    @Suppress("UNCHECKED_CAST")
                                     val newToFloat = if (floatResampler != null) {
                                         val arr = java.lang.reflect.Array.newInstance(audioProcessorClass, 2) as Array<Any>
                                         arr[0] = floatResampler

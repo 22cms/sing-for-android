@@ -8,7 +8,6 @@ import org.francasio.sing.ui.components.rememberCollapsingProgress
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -22,17 +21,14 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
-import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.outlined.Check
 import androidx.compose.material.icons.outlined.CloudDownload
 import androidx.compose.material.icons.outlined.DeleteOutline
@@ -45,7 +41,6 @@ import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.LinearWavyProgressIndicator
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.RadioButtonDefaults
@@ -58,7 +53,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInParent
 import androidx.compose.ui.platform.LocalContext
@@ -71,6 +65,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.delay
 import org.francasio.sing.R
+import org.francasio.sing.provider.SingSettings
 import org.francasio.sing.ui.theme.*
 import org.francasio.sing.util.DeviceHelper
 import org.francasio.sing.util.ModelDownloader
@@ -175,7 +170,7 @@ fun ModelSelectionScreen(
                     Icon(
                         imageVector = Icons.Outlined.Info,
                         contentDescription = null,
-                        tint = Color.White,
+                        tint = TextPrimary,
                         modifier = Modifier
                             .size(22.dp)
                             .padding(top = 2.dp)
@@ -335,7 +330,7 @@ private fun ModelGroupCard(
 
             // Model Versions
             modelDef.versions.forEachIndexed { vIndex, version ->
-                val modelInfo = ModelLoader.getModelInfo(version.id) ?: return@forEachIndexed
+                val modelInfo = ModelLoader.findCatalogModel(version.id) ?: return@forEachIndexed
                 val isSelected = (version.id == selectedModelId)
 
                 ModelVersionRow(
@@ -370,9 +365,9 @@ private fun ModelVersionRow(
 
     val isQualcomm = remember { DeviceHelper.isQualcommWithHexagonHtp }
     val isEnginePreferred = when {
-        modelInfo.engine == "native" -> true
-        isQualcomm -> modelInfo.engine == "onnx"
-        else -> modelInfo.engine == "mnn"
+        modelInfo.isViNNet -> true
+        isQualcomm -> modelInfo.engine == SingSettings.ENGINE_ONNX
+        else -> modelInfo.engine == SingSettings.ENGINE_MNN
     }
     val isPrecisionPreferred = modelInfo.precision.equals("fp16", ignoreCase = true) ||
             modelInfo.precisionBadge.equals("FP16", ignoreCase = true)
@@ -473,7 +468,7 @@ private fun ModelVersionRow(
 
             Spacer(modifier = Modifier.width(12.dp))
 
-            if (isDownloaded && !isSelected && modelInfo.engine != "native") {
+            if (isDownloaded && !isSelected && !modelInfo.isViNNet) {
                 IconButton(
                     onClick = { ModelDownloader.deleteModel(context, modelInfo) },
                     modifier = Modifier.size(32.dp)

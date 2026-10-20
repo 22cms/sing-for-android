@@ -75,12 +75,7 @@ class SingSettingsProvider : ContentProvider() {
                 return ParcelFileDescriptor.open(jsonFile, ParcelFileDescriptor.MODE_READ_ONLY)
             }
         }
-        val candidates = listOf(
-            File(File(ctx.filesDir, "models"), fileName),
-            File("/sdcard/Download/sing_models", fileName),
-            File("/storage/emulated/0/Download/sing_models", fileName),
-            File(ctx.cacheDir, fileName)
-        )
+        val candidates = org.francasio.sing.util.ModelLoader.getCandidateModelFiles(ctx, fileName)
         for (f in candidates) {
             if (f.exists() && f.length() > 0L) {
                 try {

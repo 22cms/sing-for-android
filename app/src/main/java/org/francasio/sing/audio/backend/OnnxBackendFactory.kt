@@ -51,24 +51,6 @@ object OnnxBackendFactory {
         return OnnxInferenceBackend(env, session, activeProviderName, activeProviderShort, modelInfo)
     }
 
-    @JvmStatic
-    @Synchronized
-    fun createBackend(
-        context: Context,
-        modelFile: File,
-        threads: Int,
-        forceCpu: Boolean,
-        modelInfo: ModelLoader.ModelInfo,
-        moduleApkPath: String
-    ): InferenceBackend = createBackend(
-        context,
-        modelFile,
-        threads,
-        if (forceCpu) org.francasio.sing.provider.SingSettings.TARGET_CPU else org.francasio.sing.provider.SingSettings.TARGET_NPU,
-        modelInfo,
-        moduleApkPath
-    )
-
     var activeProviderName: String = "Unknown"
         private set
     var activeProviderShort: String = "Unknown"

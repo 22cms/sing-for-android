@@ -1,7 +1,5 @@
 package org.francasio.sing.ui
 
-import android.content.pm.PackageManager
-import android.os.Build
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -21,7 +19,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.launch
@@ -35,6 +32,7 @@ import org.francasio.sing.ui.sections.SingSettingsCard
 import org.francasio.sing.ui.sections.StatusCard
 import org.francasio.sing.ui.theme.AppleMusicSingTheme
 import org.francasio.sing.ui.theme.BackgroundDark
+import org.francasio.sing.util.DeviceHelper
 import org.francasio.sing.util.ModelLoader
 
 data class BenchmarkUiState(
@@ -71,7 +69,6 @@ fun MainScreen(
     onForceSongEligibilityChange: (Boolean) -> Unit,
     onEcoModeChange: (Boolean) -> Unit,
     onHardwareTargetChange: (String) -> Unit,
-    onModelSelect: (String) -> Unit,
     onThreadCountChange: (Int) -> Unit,
     onRunBenchmark: () -> Unit,
     activeProvider: String = "",
@@ -82,22 +79,7 @@ fun MainScreen(
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
-    val apkVersion = remember(context) {
-        try {
-            val packageInfo = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                context.packageManager.getPackageInfo(
-                    context.packageName,
-                    PackageManager.PackageInfoFlags.of(0)
-                )
-            } else {
-                @Suppress("DEPRECATION")
-                context.packageManager.getPackageInfo(context.packageName, 0)
-            }
-            "v${packageInfo.versionName}"
-        } catch (_: Exception) {
-            "v1.0"
-        }
-    }
+    val apkVersion = remember(context) { DeviceHelper.getAppVersion(context) }
 
     val catalogVersion = ModelLoader.catalogVersion
     val currentModel = remember(selectedModelId, catalogVersion) {
@@ -243,7 +225,6 @@ fun MainScreenPreview() {
             onForceSongEligibilityChange = {},
             onEcoModeChange = {},
             onHardwareTargetChange = {},
-            onModelSelect = {},
             onThreadCountChange = {},
             onRunBenchmark = {}
         )

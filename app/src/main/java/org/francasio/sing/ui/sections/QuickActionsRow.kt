@@ -79,7 +79,7 @@ fun QuickActionsRow(
                         Icon(
                             painter = painterResource(id = R.drawable.ic_music_app_icon),
                             contentDescription = null,
-                            tint = Color.White,
+                            tint = TextPrimary,
                             modifier = Modifier.size(18.dp)
                         )
                         Spacer(modifier = Modifier.width(5.dp))
@@ -134,7 +134,7 @@ fun QuickActionsRow(
                         Icon(
                             painter = painterResource(id = R.drawable.ic_ai_models),
                             contentDescription = null,
-                            tint = Color.White,
+                            tint = TextPrimary,
                             modifier = Modifier.size(18.dp)
                         )
                         Spacer(modifier = Modifier.width(5.dp))
@@ -187,7 +187,7 @@ fun QuickActionsRow(
                         Icon(
                             painter = painterResource(id = R.drawable.ic_speedometer_70),
                             contentDescription = null,
-                            tint = if (isBenchmarkEnabled) Color.White else Color.White.copy(alpha = 0.35f),
+                            tint = if (isBenchmarkEnabled) TextPrimary else TextPrimary.copy(alpha = 0.35f),
                             modifier = Modifier.size(18.dp)
                         )
                         Spacer(modifier = Modifier.width(5.dp))

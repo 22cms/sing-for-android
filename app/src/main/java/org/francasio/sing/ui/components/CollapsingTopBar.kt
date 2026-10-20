@@ -143,12 +143,6 @@ fun BoxScope.ExpressiveCollapsingTopBar(
             }
     }
 
-    LaunchedEffect(progress > 0.4f) {
-        if (progress > 0.4f && !animationCancelled) {
-            animationCancelled = true
-        }
-    }
-
     val startFontSize = if (isCompactStyle) 34f else 36f
     val endFontSize = 20f
     val titleFontSize = (startFontSize - (startFontSize - endFontSize) * progress).sp
@@ -224,7 +218,7 @@ fun BoxScope.ExpressiveCollapsingTopBar(
                     Icon(
                         painter = navigationIcon.icon,
                         contentDescription = null,
-                        tint = Color.White,
+                        tint = TextPrimary,
                         modifier = Modifier
                             .size(28.dp)
                             .graphicsLayer {
@@ -237,7 +231,7 @@ fun BoxScope.ExpressiveCollapsingTopBar(
                     Icon(
                         imageVector = Icons.AutoMirrored.Filled.ArrowBack,
                         contentDescription = "Back",
-                        tint = Color.White,
+                        tint = TextPrimary,
                         modifier = Modifier
                             .size(20.dp)
                             .graphicsLayer {
@@ -267,7 +261,7 @@ fun BoxScope.ExpressiveCollapsingTopBar(
                 Icon(
                     imageVector = Icons.AutoMirrored.Filled.ArrowBack,
                     contentDescription = "Back",
-                    tint = Color.White,
+                    tint = TextPrimary,
                     modifier = Modifier.size(20.dp)
                 )
             }
@@ -291,7 +285,7 @@ fun BoxScope.ExpressiveCollapsingTopBar(
                     Icon(
                         painter = navigationIcon.icon,
                         contentDescription = null,
-                        tint = Color.White,
+                        tint = TextPrimary,
                         modifier = Modifier.size(28.dp)
                     )
                 }
@@ -354,7 +348,7 @@ fun BoxScope.TopBarActionButton(
         Icon(
             imageVector = icon,
             contentDescription = contentDescription,
-            tint = Color.White,
+            tint = TextPrimary,
             modifier = Modifier.size(22.dp)
         )
     }

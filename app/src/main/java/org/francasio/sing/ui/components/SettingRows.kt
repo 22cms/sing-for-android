@@ -67,7 +67,7 @@ fun SettingSwitchRow(
         Icon(
             painter = icon,
             contentDescription = null,
-            tint = Color.White,
+            tint = TextPrimary,
             modifier = Modifier.size(24.dp)
         )
 
@@ -161,7 +161,7 @@ fun SettingActionRow(
         Icon(
             painter = icon,
             contentDescription = null,
-            tint = Color.White,
+            tint = TextPrimary,
             modifier = Modifier.size(24.dp)
         )
 
@@ -253,7 +253,7 @@ fun SettingHardwareTargetRow(
             Icon(
                 painter = painterResource(id = R.drawable.ic_engine_sparkles),
                 contentDescription = null,
-                tint = Color.White,
+                tint = TextPrimary,
                 modifier = Modifier.size(24.dp)
             )
 
@@ -340,7 +340,7 @@ fun SettingSliderRow(
             Icon(
                 painter = icon,
                 contentDescription = null,
-                tint = Color.White,
+                tint = TextPrimary,
                 modifier = Modifier.size(24.dp)
             )
 

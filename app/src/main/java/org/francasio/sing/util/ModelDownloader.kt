@@ -36,17 +36,8 @@ object ModelDownloader {
     }
 
     fun getDownloadedModelFile(context: Context, fileName: String): File? {
-        // Only copies this process can actually READ count as "downloaded". The
-        // legacy /sdcard/Download/sing_models files can be owned by an older
-        // install (different uid): they are stat-able (exists()/length() succeed
-        // via FUSE) but open() fails with EACCES. Counting those made deleted
-        // models reappear as "installed" after every restart, and gave the
-        // module a false "model available" signal through the provider.
-        val candidates = listOf(
-            File("/sdcard/Download/sing_models", fileName),
-            File("/storage/emulated/0/Download/sing_models", fileName),
-            File(getModelsDir(context), fileName)
-        )
+        // Only copies this process can actually READ count as "downloaded".
+        val candidates = ModelLoader.getCandidateModelFiles(context, fileName)
         for (candidate in candidates) {
             if (candidate.exists() && candidate.canRead() && candidate.length() > 1024 * 1024) {
                 return candidate

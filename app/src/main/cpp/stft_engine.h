@@ -46,11 +46,6 @@ public:
     // Zero-pads bins num_bins..3072, applies Hermitian symmetry, exact window sum division and compensation.
     void inverse(const float* in_tensor, float* out_stereo_pcm, int num_bins = DEFAULT_N_BINS);
 
-    // Apply vocal attenuation blending directly in PCM domain:
-    // output = original_pcm - (1.0f - level) * vocal_pcm
-    static void blend(const float* original_pcm, const float* vocal_pcm,
-                      float* out_pcm, int sample_count, float level);
-
 private:
     std::vector<float> window_;
     std::vector<float> ola_inv_norm_;

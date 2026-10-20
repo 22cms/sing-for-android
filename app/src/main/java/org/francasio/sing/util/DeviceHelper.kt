@@ -1,5 +1,6 @@
 package org.francasio.sing.util
 
+import android.content.Context
 import android.os.Build
 import android.util.Log
 
@@ -13,6 +14,23 @@ object DeviceHelper {
             (get.invoke(null, key) as? String)?.trim() ?: ""
         } catch (_: Throwable) {
             ""
+        }
+    }
+
+    fun getAppVersion(context: Context): String {
+        return try {
+            val packageInfo = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                context.packageManager.getPackageInfo(
+                    context.packageName,
+                    android.content.pm.PackageManager.PackageInfoFlags.of(0)
+                )
+            } else {
+                @Suppress("DEPRECATION")
+                context.packageManager.getPackageInfo(context.packageName, 0)
+            }
+            "v${packageInfo.versionName ?: "1.0"}"
+        } catch (_: Throwable) {
+            "v1.0"
         }
     }
 

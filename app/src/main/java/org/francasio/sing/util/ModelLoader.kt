@@ -14,6 +14,7 @@ import android.content.pm.ApplicationInfo
 import org.francasio.sing.audio.backend.InferenceBackend
 import org.francasio.sing.audio.backend.NativeInferenceBackend
 import org.francasio.sing.audio.backend.MnnInferenceBackend
+import org.francasio.sing.audio.backend.OnnxBackendFactory
 import org.francasio.sing.provider.SingSettings
 import org.json.JSONObject
 import java.util.concurrent.Executors
@@ -566,11 +567,6 @@ object ModelLoader {
         return null
     }
 
-    fun getModelInfo(id: String): ModelInfo? {
-        if (id.isEmpty()) return null
-        return findCatalogModel(id)
-    }
-
     private var currentThreadCount: Int = -1
     var currentTarget: String = SingSettings.TARGET_NPU
         private set
@@ -599,7 +595,7 @@ object ModelLoader {
         if (modelId.isEmpty()) return null
         loadModels(context)
         val targetThreads = threads ?: if (currentThreadCount > 0) currentThreadCount else defaultThreadCount
-        val modelInfo = getModelInfo(modelId) ?: run {
+        val modelInfo = findCatalogModel(modelId) ?: run {
             Log.w(TAG, "Cannot create backend: model '$modelId' not found in catalog")
             return null
         }
@@ -638,14 +634,7 @@ object ModelLoader {
                 Log.i(TAG, "Initializing MNN backend for ${modelInfo.id} (${modelFile.name}, threads=$targetThreads, target=$hardwareTarget)...")
                 if (hardwareTarget == SingSettings.TARGET_NPU || hardwareTarget == SingSettings.TARGET_NNAPI) {
                     try {
-                        val factoryClass = Class.forName("org.francasio.sing.audio.backend.OnnxBackendFactory")
-                        val method = factoryClass.getMethod(
-                            "ensureOnnxNativeLibrariesLoaded",
-                            Context::class.java,
-                            String::class.java
-                        )
-                        val instance = factoryClass.getField("INSTANCE").get(null)
-                        method.invoke(instance, context, moduleApkPath)
+                        OnnxBackendFactory.ensureOnnxNativeLibrariesLoaded(context, moduleApkPath)
                         Log.i(TAG, "Preloaded QNN native libraries for MNN")
                     } catch (t: Throwable) {
                         Log.w(TAG, "Could not preload QNN native libraries for MNN: ${t.message}")
@@ -657,62 +646,17 @@ object ModelLoader {
                 mnn
             } else {
                 Log.i(TAG, "Initializing ONNX inference backend for ${modelInfo.id} (${modelFile.name}, target=$hardwareTarget)...")
-                try {
-                    val factoryClass = Class.forName("org.francasio.sing.audio.backend.OnnxBackendFactory")
-                    val instance = try {
-                        factoryClass.getField("INSTANCE").get(null)
-                    } catch (_: Throwable) {
-                        null
-                    }
-                    val method = try {
-                        factoryClass.getMethod(
-                            "createBackend",
-                            Context::class.java,
-                            File::class.java,
-                            Int::class.javaPrimitiveType,
-                            String::class.java,
-                            ModelInfo::class.java,
-                            String::class.java
-                        )
-                    } catch (_: NoSuchMethodException) {
-                        factoryClass.getMethod(
-                            "createBackend",
-                            Context::class.java,
-                            File::class.java,
-                            Int::class.javaPrimitiveType,
-                            Boolean::class.javaPrimitiveType,
-                            ModelInfo::class.java,
-                            String::class.java
-                        )
-                    }
-                    val onnx = if (method.parameterTypes[3] == String::class.java) {
-                        method.invoke(
-                            instance,
-                            context,
-                            modelFile,
-                            targetThreads,
-                            hardwareTarget,
-                            modelInfo,
-                            moduleApkPath
-                        ) as InferenceBackend
-                    } else {
-                        method.invoke(
-                            instance,
-                            context,
-                            modelFile,
-                            targetThreads,
-                            forceCpu,
-                            modelInfo,
-                            moduleApkPath
-                        ) as InferenceBackend
-                    }
-                    activeProviderShort = onnx.shortProviderName
-                    activeProviderName = onnx.providerName
-                    onnx
-                } catch (e: Exception) {
-                    Log.e(TAG, "Failed to initialize ONNX backend via reflection: ${e.message}", e)
-                    throw (e.cause ?: e)
-                }
+                val onnx = OnnxBackendFactory.createBackend(
+                    context,
+                    modelFile,
+                    targetThreads,
+                    hardwareTarget,
+                    modelInfo,
+                    moduleApkPath
+                )
+                activeProviderShort = onnx.shortProviderName
+                activeProviderName = onnx.providerName
+                onnx
             }
 
             currentBackend = backend
@@ -733,20 +677,6 @@ object ModelLoader {
         }
     }
 
-    fun getOrCreateBackend(
-        context: Context,
-        moduleApkPath: String,
-        threads: Int?,
-        forceCpu: Boolean,
-        modelId: String
-    ): InferenceBackend? = getOrCreateBackend(
-        context = context,
-        moduleApkPath = moduleApkPath,
-        threads = threads,
-        hardwareTarget = if (forceCpu) SingSettings.TARGET_CPU else SingSettings.TARGET_NPU,
-        modelId = modelId
-    )
-
     fun registerDynamicModel(info: ModelInfo) {
         dynamicModels[info.id] = info
         synchronized(catalogLock) {
@@ -759,6 +689,17 @@ object ModelLoader {
         }
     }
 
+    fun getCandidateModelFiles(context: Context, fileName: String): List<File> {
+        return listOf(
+            File(File(context.filesDir, "models"), fileName),
+            File("/sdcard/Download/sing_models", fileName),
+            File("/storage/emulated/0/Download/sing_models", fileName),
+            File("/data/user/0/org.francasio.sing/files/models", fileName),
+            File("/data/data/org.francasio.sing/files/models", fileName),
+            File(context.cacheDir, fileName)
+        )
+    }
+
     private fun ensureModelExtracted(context: Context, moduleApkPath: String, fileName: String): File {
         val targetFile = File(context.cacheDir, fileName)
         if (targetFile.exists() && targetFile.length() > 1024 * 1024) {
@@ -766,13 +707,7 @@ object ModelLoader {
         }
 
         // 0. Check directly in module downloaded models dir or standard shared paths
-        val directCandidates = listOf(
-            File(File(context.filesDir, "models"), fileName),
-            File("/sdcard/Download/sing_models/$fileName"),
-            File("/storage/emulated/0/Download/sing_models/$fileName"),
-            File("/data/user/0/org.francasio.sing/files/models/$fileName"),
-            File("/data/data/org.francasio.sing/files/models/$fileName")
-        )
+        val directCandidates = getCandidateModelFiles(context, fileName)
         for (f in directCandidates) {
             try {
                 if (f.exists() && f.canRead() && f.length() > 1024 * 1024) {

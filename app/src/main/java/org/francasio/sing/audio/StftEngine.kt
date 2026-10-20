@@ -51,19 +51,6 @@ class StftEngine : AutoCloseable {
             }
         }
 
-        fun blend(originalPcm: FloatArray, vocalPcm: FloatArray, outPcm: FloatArray, sampleCount: Int, level: Float) {
-            nativeBlend(originalPcm, vocalPcm, outPcm, sampleCount, level)
-        }
-
-        @JvmStatic
-        private external fun nativeBlend(
-            originalPcm: FloatArray,
-            vocalPcm: FloatArray,
-            outPcm: FloatArray,
-            sampleCount: Int,
-            level: Float
-        )
-
         @JvmStatic
         external fun nativeResamplerCreate(fromRate: Int, toRate: Int): Long
 

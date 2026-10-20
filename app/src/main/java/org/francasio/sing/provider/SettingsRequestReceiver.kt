@@ -45,29 +45,7 @@ class SettingsRequestReceiver : BroadcastReceiver() {
             // data, which silently stopped this reply from ever reaching the
             // module. The explicit grantUriPermission above already gives Apple
             // Music access to the provider.
-            val reply = Intent(SingSettings.ACTION_SETTINGS_UPDATE).apply {
-                setPackage("com.apple.android.music")
-                putExtra(SingSettings.KEY_PRESERVE_SIDE, SingSettings.preserveSide)
-                putExtra(SingSettings.KEY_TWO_WAY_SLIDER, SingSettings.twoWaySlider)
-                putExtra(SingSettings.KEY_THREAD_COUNT, SingSettings.threadCount)
-                putExtra(SingSettings.KEY_ECO_MODE, SingSettings.ecoMode)
-                putExtra(SingSettings.KEY_HARDWARE_TARGET, SingSettings.hardwareTarget)
-                putExtra(SingSettings.KEY_FORCE_CPU, SingSettings.forceCpu)
-                putExtra(SingSettings.KEY_SELECTED_MODEL, SingSettings.selectedModelId)
-                putExtra(SingSettings.KEY_ALLOW_ZERO_FLOOR, SingSettings.allowZeroFloor)
-                putExtra(SingSettings.KEY_FORCE_SONG_ELIGIBILITY, SingSettings.forceSongEligibility)
-                putExtra("module_apk_path", context.applicationInfo.sourceDir)
-                if (modelInfo != null) {
-                    putExtra("model_target_stem", modelInfo.targetStem)
-                    putExtra("model_network_type", modelInfo.networkType)
-                    putExtra("model_num_bins", modelInfo.numBins)
-                    putExtra("model_block_size", modelInfo.blockSize)
-                    putExtra("model_lookahead_size", modelInfo.lookaheadSize)
-                    putExtra("model_file_name", modelInfo.fileName)
-                    putExtra("model_engine", modelInfo.engine)
-                    putExtra("model_precision", modelInfo.precision)
-                }
-            }
+            val reply = SingSettings.createSettingsUpdateIntent(context, "com.apple.android.music")
             context.sendBroadcast(reply)
             Log.i("AppleSing_Settings", "Replied to REQUEST_SETTINGS: apk=${context.applicationInfo.sourceDir}, preserveSide=${SingSettings.preserveSide}, twoWaySlider=${SingSettings.twoWaySlider}, threads=${SingSettings.threadCount}, ecoMode=${SingSettings.ecoMode}, target=${SingSettings.hardwareTarget} (forceCpu=${SingSettings.forceCpu}), model=${SingSettings.selectedModelId} (${modelInfo?.fileName ?: "catalog entry not found - module resolves id itself"}), allowZeroFloor=${SingSettings.allowZeroFloor}, forceSongEligibility=${SingSettings.forceSongEligibility}")
         }

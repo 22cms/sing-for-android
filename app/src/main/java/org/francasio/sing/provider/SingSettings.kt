@@ -248,6 +248,35 @@ object SingSettings {
         }
     }
 
+    fun createSettingsUpdateIntent(context: Context, targetPackage: String? = null): Intent {
+        val modelInfo = org.francasio.sing.util.ModelLoader.findCatalogModel(selectedModelId)
+        return Intent(ACTION_SETTINGS_UPDATE).apply {
+            if (targetPackage != null) {
+                setPackage(targetPackage)
+            }
+            putExtra(KEY_PRESERVE_SIDE, preserveSide)
+            putExtra(KEY_TWO_WAY_SLIDER, twoWaySlider)
+            putExtra(KEY_THREAD_COUNT, threadCount)
+            putExtra(KEY_ECO_MODE, ecoMode)
+            putExtra(KEY_HARDWARE_TARGET, hardwareTarget)
+            putExtra(KEY_FORCE_CPU, forceCpu)
+            putExtra(KEY_SELECTED_MODEL, selectedModelId)
+            putExtra(KEY_ALLOW_ZERO_FLOOR, allowZeroFloor)
+            putExtra(KEY_FORCE_SONG_ELIGIBILITY, forceSongEligibility)
+            putExtra("module_apk_path", context.applicationInfo.sourceDir)
+            if (modelInfo != null) {
+                putExtra("model_target_stem", modelInfo.targetStem)
+                putExtra("model_network_type", modelInfo.networkType)
+                putExtra("model_num_bins", modelInfo.numBins)
+                putExtra("model_block_size", modelInfo.blockSize)
+                putExtra("model_lookahead_size", modelInfo.lookaheadSize)
+                putExtra("model_file_name", modelInfo.fileName)
+                putExtra("model_engine", modelInfo.engine)
+                putExtra("model_precision", modelInfo.precision)
+            }
+        }
+    }
+
     fun broadcastSettings(context: Context) {
         try {
             val baseUri = Uri.parse("content://org.francasio.sing.provider/")
@@ -259,40 +288,9 @@ object SingSettings {
                 )
             } catch (_: Throwable) {}
 
-            // Only ship model file/engine info when the catalog actually has the
-            // id - a fabricated native fallback would register a wrong "dynamic
-            // model" in the module (see SettingsRequestReceiver for the full story).
-            val modelInfo = org.francasio.sing.util.ModelLoader.findCatalogModel(selectedModelId)
-            // NOTE: deliberately no data URI / grant flags on this intent. A
-            // dynamically registered IntentFilter(action) does not match intents
-            // that carry a data URI, so attaching the provider URI silently
-            // stopped this broadcast from ever reaching the module (live model
-            // switches were never delivered; Apple Music only picked settings up
-            // at process start). The provider URI is granted to Apple Music
-            // explicitly above.
-            val intent = Intent(ACTION_SETTINGS_UPDATE).apply {
-                putExtra(KEY_PRESERVE_SIDE, preserveSide)
-                putExtra(KEY_TWO_WAY_SLIDER, twoWaySlider)
-                putExtra(KEY_THREAD_COUNT, threadCount)
-                putExtra(KEY_ECO_MODE, ecoMode)
-                putExtra(KEY_HARDWARE_TARGET, hardwareTarget)
-                putExtra(KEY_FORCE_CPU, forceCpu)
-                putExtra(KEY_SELECTED_MODEL, selectedModelId)
-                putExtra(KEY_ALLOW_ZERO_FLOOR, allowZeroFloor)
-                putExtra(KEY_FORCE_SONG_ELIGIBILITY, forceSongEligibility)
-                putExtra("module_apk_path", context.applicationInfo.sourceDir)
-                if (modelInfo != null) {
-                    putExtra("model_target_stem", modelInfo.targetStem)
-                    putExtra("model_network_type", modelInfo.networkType)
-                    putExtra("model_num_bins", modelInfo.numBins)
-                    putExtra("model_block_size", modelInfo.blockSize)
-                    putExtra("model_lookahead_size", modelInfo.lookaheadSize)
-                    putExtra("model_file_name", modelInfo.fileName)
-                    putExtra("model_engine", modelInfo.engine)
-                    putExtra("model_precision", modelInfo.precision)
-                }
-            }
+            val intent = createSettingsUpdateIntent(context)
             context.sendBroadcast(intent)
+            val modelInfo = org.francasio.sing.util.ModelLoader.findCatalogModel(selectedModelId)
             Log.i(TAG, "Broadcasted settings: preserveSide=$preserveSide, twoWaySlider=$twoWaySlider, threads=$threadCount, ecoMode=$ecoMode, target=$hardwareTarget (forceCpu=$forceCpu), model=$selectedModelId (${modelInfo?.fileName ?: "catalog entry not found"}), allowZeroFloor=$allowZeroFloor, forceSongEligibility=$forceSongEligibility")
         } catch (t: Throwable) {
             Log.w(TAG, "Failed to broadcast settings: ${t.message}")
@@ -482,8 +480,8 @@ object SingSettings {
             val cachedTarget = prefs.getString(KEY_HARDWARE_TARGET, null)
             hardwareTarget = cachedTarget ?: if (prefs.getBoolean(KEY_FORCE_CPU, false)) TARGET_CPU else TARGET_NPU
             selectedModelId = sanitizeModelId(prefs.getString(KEY_SELECTED_MODEL, DEFAULT_MODEL_ID))
-            allowZeroFloor = prefs.getBoolean(KEY_ALLOW_ZERO_FLOOR, true)
-            forceSongEligibility = prefs.getBoolean(KEY_FORCE_SONG_ELIGIBILITY, true)
+            allowZeroFloor = prefs.getBoolean(KEY_ALLOW_ZERO_FLOOR, false)
+            forceSongEligibility = prefs.getBoolean(KEY_FORCE_SONG_ELIGIBILITY, false)
             Log.i(TAG, "Loaded cached settings: preserveSide=$preserveSide, twoWaySlider=$twoWaySlider, threads=$threadCount, ecoMode=$ecoMode, target=$hardwareTarget (forceCpu=$forceCpu), model=$selectedModelId, allowZeroFloor=$allowZeroFloor, forceSongEligibility=$forceSongEligibility")
         } catch (t: Throwable) {
             Log.w(TAG, "Could not load cached settings: ${t.message}")

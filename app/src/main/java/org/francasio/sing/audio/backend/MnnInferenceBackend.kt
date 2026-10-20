@@ -13,19 +13,6 @@ class MnnInferenceBackend(
     backendPreference: Int = targetToPreference(target)
 ) : InferenceBackend {
 
-    // Overload for backward compatibility with forceCpu
-    constructor(
-        modelFile: File,
-        threads: Int,
-        forceCpu: Boolean,
-        modelInfo: ModelLoader.ModelInfo
-    ) : this(
-        modelFile,
-        threads,
-        if (forceCpu) SingSettings.TARGET_CPU else SingSettings.TARGET_NPU,
-        modelInfo
-    )
-
     companion object {
         private const val TAG = "AppleSing_MNN"
         const val BACKEND_AUTO = 0

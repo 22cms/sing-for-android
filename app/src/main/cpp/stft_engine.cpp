@@ -240,12 +240,4 @@ void StftEngine::inverse(const float* in_tensor, float* out_stereo_pcm, int num_
     }
 }
 
-void StftEngine::blend(const float* original_pcm, const float* vocal_pcm,
-                       float* out_pcm, int sample_count, float level) {
-    float attenuation_factor = 1.0f - level;
-    for (int i = 0; i < sample_count * 2; ++i) {
-        out_pcm[i] = original_pcm[i] - (attenuation_factor * vocal_pcm[i]);
-    }
-}
-
 } // namespace sing

@@ -71,7 +71,7 @@ fun PipelineDetailsCard(
                     Icon(
                         painter = painterResource(id = R.drawable.ic_speedometer_70),
                         contentDescription = null,
-                        tint = Color.White,
+                        tint = TextPrimary,
                         modifier = Modifier.size(24.dp)
                     )
                     Spacer(modifier = Modifier.width(14.dp))
@@ -193,7 +193,11 @@ fun PipelineDetailsCard(
                 // Technical readout specs
                 PipelineSpecRow(
                     label = stringResource(id = R.string.label_neural_engine),
-                    value = if (isOnnxModel) "ONNX Runtime QNN v1.29" else "Alibaba MNN v3.6.1"
+                    value = when {
+                        currentModel?.isViNNet == true -> "Native Vi-NNet (NEON C++)"
+                        isOnnxModel -> "ONNX Runtime QNN v1.29"
+                        else -> "Alibaba MNN v3.6.1"
+                    }
                 )
                 PipelineSpecRow(
                     label = stringResource(id = R.string.label_compute_precision),
@@ -245,7 +249,7 @@ fun PipelineDetailsCard(
                 )
                 PipelineSpecRow(
                     label = stringResource(id = R.string.label_audio_pipeline),
-                    value = "KissFFT STFT (6144) ➔ NN ➔ iSTFT"
+                    value = if (currentModel?.isTimeDomain == true) "Time-Domain Frame Pacing (4096) ➔ NN" else "KissFFT STFT (6144) ➔ NN ➔ iSTFT"
                 )
                 PipelineSpecRow(
                     label = stringResource(id = R.string.label_audio_format),
@@ -253,13 +257,14 @@ fun PipelineDetailsCard(
                 )
 
                 benchmarkState.result?.let { result ->
+                    val isTimeDomain = currentModel?.isTimeDomain == true
                     PipelineSpecRow(
                         label = stringResource(id = R.string.label_chunk_latency),
-                        value = "${result.totalMs} ms (Audio: 5,921 ms)"
+                        value = if (isTimeDomain) "${result.totalMs} ms (Audio: ~93 ms)" else "${result.totalMs} ms (Audio: 5,921 ms)"
                     )
                     PipelineSpecRow(
                         label = stringResource(id = R.string.label_breakdown),
-                        value = "STFT: ${result.stftMs}ms • NN: ${result.nnMs}ms • iSTFT: ${result.istftMs}ms"
+                        value = if (isTimeDomain) "Time-Domain NN: ${result.nnMs}ms" else "STFT: ${result.stftMs}ms • NN: ${result.nnMs}ms • iSTFT: ${result.istftMs}ms"
                     )
                 }
             }

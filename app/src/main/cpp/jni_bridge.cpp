@@ -48,21 +48,6 @@ Java_org_francasio_sing_audio_StftEngine_nativeInverse(
     env->ReleaseFloatArrayElements(out_stereo_pcm, pcm_ptr, 0);
 }
 
-JNIEXPORT void JNICALL
-Java_org_francasio_sing_audio_StftEngine_nativeBlend(
-        JNIEnv* env, jclass /*clazz*/, jfloatArray original_pcm, jfloatArray vocal_pcm,
-        jfloatArray out_pcm, jint sample_count, jfloat level) {
-    jfloat* orig_ptr = env->GetFloatArrayElements(original_pcm, nullptr);
-    jfloat* vocal_ptr = env->GetFloatArrayElements(vocal_pcm, nullptr);
-    jfloat* out_ptr = env->GetFloatArrayElements(out_pcm, nullptr);
-
-    sing::StftEngine::blend(orig_ptr, vocal_ptr, out_ptr, sample_count, level);
-
-    env->ReleaseFloatArrayElements(original_pcm, orig_ptr, JNI_ABORT);
-    env->ReleaseFloatArrayElements(vocal_pcm, vocal_ptr, JNI_ABORT);
-    env->ReleaseFloatArrayElements(out_pcm, out_ptr, 0);
-}
-
 JNIEXPORT jlong JNICALL
 Java_org_francasio_sing_audio_StftEngine_nativeResamplerCreate(
         JNIEnv* /*env*/, jclass /*clazz*/, jint fromRate, jint toRate) {
@@ -101,22 +86,6 @@ Java_org_francasio_sing_audio_StftEngine_nativeResamplerDestroy(
         JNIEnv* /*env*/, jclass /*clazz*/, jlong handle) {
     auto* resampler = reinterpret_cast<sing::SincResampler*>(handle);
     delete resampler;
-}
-
-JNIEXPORT jboolean JNICALL
-Java_org_francasio_sing_util_ReflectionUtils_nativeSetStaticFloatField(
-        JNIEnv* env, jclass /*clazz*/, jclass targetClass, jstring fieldName, jfloat value) {
-    if (!targetClass || !fieldName) return JNI_FALSE;
-    const char* name = env->GetStringUTFChars(fieldName, nullptr);
-    if (!name) return JNI_FALSE;
-    jfieldID fid = env->GetStaticFieldID(targetClass, name, "F");
-    env->ReleaseStringUTFChars(fieldName, name);
-    if (!fid) {
-        env->ExceptionClear();
-        return JNI_FALSE;
-    }
-    env->SetStaticFloatField(targetClass, fid, value);
-    return JNI_TRUE;
 }
 
 } // extern "C"
