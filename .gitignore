@@ -37,3 +37,6 @@ artifacts/
 *.onnx
 *.tflite
 *.vinet
+
+# MNN build directory
+build-mnn/

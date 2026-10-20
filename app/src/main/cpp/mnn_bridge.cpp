@@ -13,6 +13,21 @@
 
 #define MLOG(...) __android_log_print(ANDROID_LOG_INFO, "AppleSing_MNN", __VA_ARGS__)
 
+static bool testSession(MNN::Interpreter* interp, MNN::Session* sess) {
+    if (!interp || !sess) return false;
+    try {
+        int rc = interp->runSession(sess);
+        if (rc != 0) {
+            MLOG("MNN test run failed with rc=%d", rc);
+            return false;
+        }
+        return true;
+    } catch (...) {
+        MLOG("MNN test run threw exception");
+        return false;
+    }
+}
+
 struct MnnHandle {
     MNN::Interpreter* interp = nullptr;
     MNN::Session* sess = nullptr;
@@ -103,7 +118,7 @@ Java_org_francasio_sing_audio_backend_MnnInferenceBackend_nativeCreate(
     bool allowQnn = (backendPref == 0 || backendPref == 1);
     bool allowOpenCL = (backendPref == 0 || backendPref == 2);
     bool allowVulkan = (backendPref == 0 || backendPref == 2);
-    bool allowNnapi = (backendPref == 0 || backendPref == 3);
+    bool allowNnapi = (backendPref == 0 || backendPref == 1 || backendPref == 3);
 
     if (allowQnn && !h->sess) {
         // 1. Try Qualcomm QNN (Hexagon HTP NPU)
@@ -111,7 +126,7 @@ Java_org_francasio_sing_audio_backend_MnnInferenceBackend_nativeCreate(
             MNN::ScheduleConfig qcfg;
             qcfg.type = MNN_FORWARD_QNN;
             qcfg.numThread = h->threads;
-            qcfg.backupType = MNN_FORWARD_QNN; // Do not silently fall back to CPU
+            qcfg.backupType = MNN_FORWARD_CPU;
             MNN::BackendConfig bcfg;
             bcfg.precision = MNN::BackendConfig::Precision_Low;
             bcfg.power = MNN::BackendConfig::Power_High;
@@ -131,8 +146,14 @@ Java_org_francasio_sing_audio_backend_MnnInferenceBackend_nativeCreate(
             if (h->sess) {
                 int backends[8] = {-1, -1, -1, -1, -1, -1, -1, -1};
                 if (h->interp->getSessionInfo(h->sess, MNN::Interpreter::BACKENDS, backends) && backends[0] == MNN_FORWARD_QNN) {
-                    h->backendTag = "QNN (Hexagon HTP NPU)";
-                    MLOG("MNN session verified with Qualcomm QNN backend (HTP runtime)");
+                    if (testSession(h->interp, h->sess)) {
+                        h->backendTag = "QNN (Hexagon HTP NPU)";
+                        MLOG("MNN session verified with Qualcomm QNN backend (HTP runtime)");
+                    } else {
+                        MLOG("MNN QNN session test run failed; rejecting");
+                        h->interp->releaseSession(h->sess);
+                        h->sess = nullptr;
+                    }
                 } else {
                     MLOG("MNN QNN session creation did not resolve to QNN (got backend=%d); rejecting", backends[0]);
                     h->interp->releaseSession(h->sess);
@@ -149,8 +170,8 @@ Java_org_francasio_sing_audio_backend_MnnInferenceBackend_nativeCreate(
         try {
             MNN::ScheduleConfig clcfg;
             clcfg.type = MNN_FORWARD_OPENCL;
-            clcfg.mode = MNN_GPU_MEMORY_IMAGE | MNN_GPU_TUNING_FAST | MNN_GPU_RECORD_BATCH;
-            clcfg.backupType = MNN_FORWARD_OPENCL; // Do not silently fall back to CPU
+            clcfg.mode = MNN_GPU_MEMORY_IMAGE | MNN_GPU_TUNING_FAST;
+            clcfg.backupType = MNN_FORWARD_CPU;
             MNN::BackendConfig bcfg;
             bcfg.precision = targetPrecision;
             bcfg.power = MNN::BackendConfig::Power_High;
@@ -159,8 +180,14 @@ Java_org_francasio_sing_audio_backend_MnnInferenceBackend_nativeCreate(
             if (h->sess) {
                 int backends[8] = {-1, -1, -1, -1, -1, -1, -1, -1};
                 if (h->interp->getSessionInfo(h->sess, MNN::Interpreter::BACKENDS, backends) && backends[0] == MNN_FORWARD_OPENCL) {
-                    h->backendTag = "OpenCL GPU";
-                    MLOG("MNN session verified with OpenCL GPU backend");
+                    if (testSession(h->interp, h->sess)) {
+                        h->backendTag = "OpenCL GPU";
+                        MLOG("MNN session verified with OpenCL GPU backend");
+                    } else {
+                        MLOG("MNN OpenCL session test run failed; rejecting");
+                        h->interp->releaseSession(h->sess);
+                        h->sess = nullptr;
+                    }
                 } else {
                     MLOG("MNN OpenCL session creation did not resolve to OpenCL (got backend=%d); rejecting", backends[0]);
                     h->interp->releaseSession(h->sess);
@@ -177,8 +204,8 @@ Java_org_francasio_sing_audio_backend_MnnInferenceBackend_nativeCreate(
         try {
             MNN::ScheduleConfig vkcfg;
             vkcfg.type = MNN_FORWARD_VULKAN;
-            vkcfg.mode = MNN_GPU_TUNING_FAST;
-            vkcfg.backupType = MNN_FORWARD_VULKAN; // Do not silently fall back to CPU
+            vkcfg.mode = MNN_GPU_TUNING_WIDE | MNN_GPU_RECORD_BATCH;
+            vkcfg.backupType = MNN_FORWARD_CPU;
             MNN::BackendConfig bcfg;
             bcfg.precision = targetPrecision;
             bcfg.power = MNN::BackendConfig::Power_High;
@@ -187,8 +214,14 @@ Java_org_francasio_sing_audio_backend_MnnInferenceBackend_nativeCreate(
             if (h->sess) {
                 int backends[8] = {-1, -1, -1, -1, -1, -1, -1, -1};
                 if (h->interp->getSessionInfo(h->sess, MNN::Interpreter::BACKENDS, backends) && backends[0] == MNN_FORWARD_VULKAN) {
-                    h->backendTag = "Vulkan GPU";
-                    MLOG("MNN session verified with Vulkan GPU backend");
+                    if (testSession(h->interp, h->sess)) {
+                        h->backendTag = "Vulkan GPU";
+                        MLOG("MNN session verified with Vulkan GPU backend");
+                    } else {
+                        MLOG("MNN Vulkan session test run failed; rejecting");
+                        h->interp->releaseSession(h->sess);
+                        h->sess = nullptr;
+                    }
                 } else {
                     MLOG("MNN Vulkan session creation did not resolve to Vulkan (got backend=%d); rejecting", backends[0]);
                     h->interp->releaseSession(h->sess);
@@ -206,7 +239,7 @@ Java_org_francasio_sing_audio_backend_MnnInferenceBackend_nativeCreate(
             MNN::ScheduleConfig nncfg;
             nncfg.type = MNN_FORWARD_NN;
             nncfg.numThread = h->threads;
-            nncfg.backupType = MNN_FORWARD_NN; // Do not silently fall back to CPU
+            nncfg.backupType = MNN_FORWARD_CPU;
             MNN::BackendConfig bcfg;
             bcfg.precision = targetPrecision;
             bcfg.power = MNN::BackendConfig::Power_High;
@@ -215,8 +248,14 @@ Java_org_francasio_sing_audio_backend_MnnInferenceBackend_nativeCreate(
             if (h->sess) {
                 int backends[8] = {-1, -1, -1, -1, -1, -1, -1, -1};
                 if (h->interp->getSessionInfo(h->sess, MNN::Interpreter::BACKENDS, backends) && backends[0] == MNN_FORWARD_NN) {
-                    h->backendTag = "NNAPI";
-                    MLOG("MNN session verified with NNAPI backend");
+                    if (testSession(h->interp, h->sess)) {
+                        h->backendTag = "NNAPI";
+                        MLOG("MNN session verified with NNAPI backend");
+                    } else {
+                        MLOG("MNN NNAPI session test run failed; rejecting and falling back");
+                        h->interp->releaseSession(h->sess);
+                        h->sess = nullptr;
+                    }
                 } else {
                     MLOG("MNN NNAPI session creation did not resolve to NNAPI (got backend=%d); rejecting", backends[0]);
                     h->interp->releaseSession(h->sess);
