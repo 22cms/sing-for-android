@@ -70,37 +70,25 @@
 
 ### 1. Clone with Submodules
 
-This project uses [KissFFT](https://github.com/mborgerding/kissfft) as a submodule in `extern/kissfft`. Clone recursively or initialize the submodule:
+This project uses [KissFFT](https://github.com/mborgerding/kissfft) as a submodule in `extern/kissfft`. 
 
 ```bash
 # Clone the repository recursively
 git clone --recursive https://github.com/22cms/sing-for-android.git
 cd sing-for-android
 
-# If already cloned without submodules:
-git submodule update --init --recursive
-```
-
 ### 2. Build libMNN with Hexagon HTP NPU & Vulkan
 
-To keep the repository clean of large binary blobs, `libMNN.so` is built directly from source rather than checked into git. 
-
-Run the automated MNN build script:
+Run the automated MNN build script, which will patch and compile MNN:
 
 ```bash
 bash scripts/build_mnn.sh
 ```
 
-This script will:
-- Clone the upstream Alibaba MNN repository into `build-mnn/MNN/`.
-- Apply project patches from `scripts/mnn_patches.patch` (enabling Qualcomm Hexagon HTP layout-aware transpose and crash-free NNAPI fallback).
-- Download Qualcomm QNN SDK v2.37 dependencies into MNN's 3rdParty directory.
-- Compile optimized `libMNN.so` with static STL (`c++_static`), Vulkan GPU, OpenCL, NNAPI, and QNN HTP NPU support for `arm64-v8a` and `armeabi-v7a`.
-- Strip symbols and install the resulting shared libraries into `app/src/main/jniLibs/`.
 
 ### 3. Build Application APK
 
-Once `libMNN.so` is built and the KissFFT submodule is initialized, build the APK using Gradle:
+Build the APK using Gradle:
 
 ```bash
 # Build Debug APK (arm64-v8a)
