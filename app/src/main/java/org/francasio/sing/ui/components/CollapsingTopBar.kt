@@ -1,5 +1,8 @@
 package org.francasio.sing.ui.components
 
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -20,7 +23,12 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -33,6 +41,12 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.filter
+import kotlinx.coroutines.flow.take
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import org.francasio.sing.ui.theme.DividerDark
 import org.francasio.sing.ui.theme.Primary
 import org.francasio.sing.ui.theme.SurfaceContainerHigh
@@ -82,6 +96,63 @@ fun BoxScope.ExpressiveCollapsingTopBar(
 
     val hasBackButton = navigationIcon is NavigationIcon.Morphing || navigationIcon is NavigationIcon.Back
     val isCompactStyle = navigationIcon is NavigationIcon.Back && subtitle == null
+    val hasBackButtonAndIcon = navigationIcon is NavigationIcon.Morphing
+
+    var animationPlayed by remember { mutableStateOf(false) }
+    var animationCancelled by remember { mutableStateOf(false) }
+    val animProgress = remember { Animatable(0f) }
+
+    val isSpawnAnimationRunning = hasBackButtonAndIcon && !animationPlayed && !animationCancelled && (progress <= 0.4f)
+
+    LaunchedEffect(hasBackButtonAndIcon) {
+        if (!hasBackButtonAndIcon || progress > 0.4f) {
+            animationCancelled = true
+            return@LaunchedEffect
+        }
+
+        val job = launch {
+            try {
+                // Wait 500ms from the page being loaded before starting the animation
+                delay(500)
+
+                // Forward: icon spins 180° to the right and fades out;
+                // back arrow symbol (sitting at -180°) fades in and spins 180° to the right (to 0°)
+                animProgress.animateTo(
+                    targetValue = 1f,
+                    animationSpec = tween(durationMillis = 350, easing = FastOutSlowInEasing)
+                )
+                // Stay on screen for 500ms
+                delay(500)
+                // The animation reverses
+                animProgress.animateTo(
+                    targetValue = 0f,
+                    animationSpec = tween(durationMillis = 350, easing = FastOutSlowInEasing)
+                )
+                animationPlayed = true
+            } finally {
+                if (!animationPlayed) {
+                    withContext(NonCancellable) {
+                        animProgress.snapTo(0f)
+                    }
+                }
+            }
+        }
+
+        // The animation cancels itself if the user scrolls enough for the arrow icon to automatically appear by itself (> 0.4f)
+        snapshotFlow { progress > 0.4f }
+            .filter { it }
+            .take(1)
+            .collect {
+                animationCancelled = true
+                job.cancel()
+            }
+    }
+
+    LaunchedEffect(progress > 0.4f) {
+        if (progress > 0.4f && !animationCancelled) {
+            animationCancelled = true
+        }
+    }
 
     val startFontSize = if (isCompactStyle) 34f else 36f
     val endFontSize = 20f
@@ -123,6 +194,22 @@ fun BoxScope.ExpressiveCollapsingTopBar(
             val circleEndY = statusBarTop + (pinnedTopBarHeight - 40.dp) / 2
             val circleY = circleStartY + (circleEndY - circleStartY) * progress
 
+            val t = animProgress.value
+            val arrowScale = circleSize / 40.dp
+            val morphIconRotation = if (isSpawnAnimationRunning) t * 180f else 0f
+            val morphIconAlpha = if (isSpawnAnimationRunning) {
+                ((1f - t) * (1f - progress * 2f)).coerceIn(0f, 1f)
+            } else {
+                (1f - progress * 2f).coerceIn(0f, 1f)
+            }
+
+            val morphArrowRotation = if (isSpawnAnimationRunning) -180f + (t * 180f) else 0f
+            val morphArrowAlpha = if (isSpawnAnimationRunning) {
+                t
+            } else {
+                if (progress > 0.4f) ((progress - 0.4f) * 2.5f).coerceIn(0f, 1f) else 0f
+            }
+
             Box(
                 modifier = Modifier
                     .offset(x = circleX, y = circleY)
@@ -138,7 +225,7 @@ fun BoxScope.ExpressiveCollapsingTopBar(
                     .clickable(onClick = navigationIcon.onBack),
                 contentAlignment = Alignment.Center
             ) {
-                if (progress < 0.6f) {
+                if (morphIconAlpha > 0.001f) {
                     Icon(
                         painter = navigationIcon.icon,
                         contentDescription = null,
@@ -146,11 +233,12 @@ fun BoxScope.ExpressiveCollapsingTopBar(
                         modifier = Modifier
                             .size(28.dp)
                             .graphicsLayer {
-                                alpha = (1f - progress * 2f).coerceIn(0f, 1f)
+                                alpha = morphIconAlpha
+                                rotationZ = morphIconRotation
                             }
                     )
                 }
-                if (progress > 0.4f) {
+                if (morphArrowAlpha > 0.001f) {
                     Icon(
                         imageVector = Icons.AutoMirrored.Filled.ArrowBack,
                         contentDescription = "Back",
@@ -158,7 +246,10 @@ fun BoxScope.ExpressiveCollapsingTopBar(
                         modifier = Modifier
                             .size(20.dp)
                             .graphicsLayer {
-                                alpha = ((progress - 0.4f) * 2.5f).coerceIn(0f, 1f)
+                                alpha = morphArrowAlpha
+                                rotationZ = morphArrowRotation
+                                scaleX = arrowScale
+                                scaleY = arrowScale
                             }
                     )
                 }
