@@ -126,6 +126,9 @@ object ModelLoader {
     ) {
         val isInstrumental: Boolean get() = targetStem.equals("instrumental", ignoreCase = true)
         val isTimeDomain: Boolean get() = networkType.equals("time_domain", ignoreCase = true)
+        val isViNNet: Boolean get() = engine.equals(SingSettings.ENGINE_NATIVE, ignoreCase = true) || modelId == "apple_sing"
+        val isOnnx: Boolean get() = engine.equals(SingSettings.ENGINE_ONNX, ignoreCase = true)
+        val isMnn: Boolean get() = engine.equals(SingSettings.ENGINE_MNN, ignoreCase = true)
         val runtimeBadge: String get() = when {
             engine.equals(SingSettings.ENGINE_NATIVE, ignoreCase = true) -> "Native"
             engine.equals(SingSettings.ENGINE_MNN, ignoreCase = true) -> "MNN"
