@@ -1,4 +1,6 @@
 import com.android.build.api.variant.FilterConfiguration
+import java.io.FileInputStream
+import java.util.Properties
 
 plugins {
     id("com.android.application")
@@ -40,21 +42,59 @@ android {
         }
     }
 
-    // Optional release signing driven by environment variables. When missing,
-    // release builds fall back to the Android debug keystore for consistent LSPatch signatures.
     signingConfigs {
         create("releaseEnv") {
-            val ksPath = System.getenv("TEMPLATE_KS_PATH")
-            val ksPass = System.getenv("TEMPLATE_KS_PASS")
-            val alias = System.getenv("TEMPLATE_KEY_ALIAS")
-            val keyPass = System.getenv("TEMPLATE_KEY_PASS")
-            if (!ksPath.isNullOrBlank() && !ksPass.isNullOrBlank()
-                    && !alias.isNullOrBlank() && !keyPass.isNullOrBlank()) {
-                storeFile = file(ksPath)
-                storePassword = ksPass
-                keyAlias = alias
-                keyPassword = keyPass
+            // Check both root project and app/ folder in case it was saved in either place
+            val candidates = listOf(
+                rootProject.file("keystore.properties"),
+                file("keystore.properties")
+            )
+            val keystorePropertiesFile = candidates.firstOrNull { it.exists() }
+
+            if (keystorePropertiesFile != null) {
+                val properties = Properties().apply {
+                    keystorePropertiesFile.inputStream().use { load(it) }
+                }
+                val fileProp = properties.getProperty("storeFile")?.trim()
+                if (!fileProp.isNullOrBlank()) {
+                    // Resolve keystore file relative to root or app/
+                    val resolvedFile = listOf(
+                        rootProject.file(fileProp),
+                        file(fileProp)
+                    ).firstOrNull { it.exists() } ?: rootProject.file(fileProp)
+
+                    storeFile = resolvedFile
+                    storePassword = properties.getProperty("storePassword")?.trim()
+                    keyAlias = properties.getProperty("keyAlias")?.trim()
+                    keyPassword = properties.getProperty("keyPassword")?.trim()
+
+                    println(">>> [SIGNING SUCCESS] Using keystore: ${resolvedFile.absolutePath} (exists: ${resolvedFile.exists()})")
+                } else {
+                    println(">>> [SIGNING WARNING] 'storeFile' property is missing or blank inside ${keystorePropertiesFile.absolutePath}")
+                }
+            } else {
+                println(">>> [SIGNING WARNING] keystore.properties NOT found in root or app/ folder! Falling back to Debug.")
+                println(">>> Checked paths:")
+                candidates.forEach { println(">>>   - ${it.absolutePath}") }
             }
+        }
+    }
+
+    val envSigning = signingConfigs.getByName("releaseEnv")
+    val chosenSigning = if (envSigning.storeFile != null) envSigning else signingConfigs.getByName("debug")
+
+    buildTypes {
+        getByName("debug") {
+            signingConfig = chosenSigning
+        }
+
+        getByName("release") {
+            isMinifyEnabled = false
+            proguardFiles(
+                getDefaultProguardFile("proguard-android-optimize.txt"),
+                "proguard-rules.pro"
+            )
+            signingConfig = chosenSigning
         }
     }
 
@@ -62,18 +102,6 @@ android {
         cmake {
             path = file("src/main/cpp/CMakeLists.txt")
             version = "3.22.1"
-        }
-    }
-
-    buildTypes {
-        release {
-            isMinifyEnabled = false
-            proguardFiles(
-                getDefaultProguardFile("proguard-android-optimize.txt"),
-                "proguard-rules.pro"
-            )
-            val envSigning = signingConfigs.getByName("releaseEnv")
-            signingConfig = if (envSigning.storeFile != null) envSigning else signingConfigs.getByName("debug")
         }
     }
 

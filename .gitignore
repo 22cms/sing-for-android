@@ -13,6 +13,7 @@ release/
 
 # Local configuration
 local.properties
+keystore.properties
 .gradle/
 build/
 app/build/
