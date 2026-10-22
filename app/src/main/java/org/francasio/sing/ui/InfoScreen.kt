@@ -22,9 +22,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.OpenInNew
-import androidx.compose.material.icons.outlined.Code
-import androidx.compose.material.icons.outlined.Palette
+import androidx.compose.material.icons.automirrored.filled.ExitToApp
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.HorizontalDivider
@@ -38,6 +36,7 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.graphics.vector.rememberVectorPainter
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -226,7 +225,7 @@ fun InfoScreen(
 
             GroupedCardItem(index = 0, total = 1) {
                 SettingSwitchRow(
-                    icon = Icons.Outlined.Palette,
+                    icon = painterResource(id = R.drawable.ic_palette),
                     title = stringResource(id = R.string.info_material_you_title),
                     description = stringResource(id = R.string.info_material_you_desc),
                     checked = materialYou,
@@ -239,10 +238,10 @@ fun InfoScreen(
             // 3. Source Code / GitHub
             GroupedCardItem(index = 0, total = 1) {
                 SettingActionRow(
-                    icon = Icons.Outlined.Code,
+                    icon = painterResource(id = R.drawable.ic_code),
                     title = stringResource(id = R.string.info_github_title),
                     description = stringResource(id = R.string.info_github_desc),
-                    trailingIcon = Icons.AutoMirrored.Filled.OpenInNew,
+                    trailingIcon = rememberVectorPainter(Icons.AutoMirrored.Filled.ExitToApp),
                     onClick = {
                         try {
                             val intent = Intent(Intent.ACTION_VIEW, Uri.parse("https://github.com/22cms/sing-for-android"))

@@ -12,7 +12,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.Cancel
+import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.CheckCircle
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
@@ -68,7 +68,7 @@ fun StatusCard(
                         contentAlignment = Alignment.Center
                     ) {
                         Icon(
-                            imageVector = if (isModuleLoaded) Icons.Outlined.CheckCircle else Icons.Outlined.Cancel,
+                            imageVector = if (isModuleLoaded) Icons.Outlined.CheckCircle else Icons.Outlined.Close,
                             contentDescription = null,
                             tint = if (isModuleLoaded) {
                                 if (isMaterialYou) Accent2_900 else Primary

@@ -30,8 +30,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Check
-import androidx.compose.material.icons.outlined.CloudDownload
-import androidx.compose.material.icons.outlined.DeleteOutline
+import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -489,7 +488,7 @@ private fun ModelVersionRow(
                     modifier = Modifier.size(32.dp)
                 ) {
                     Icon(
-                        imageVector = Icons.Outlined.DeleteOutline,
+                        imageVector = Icons.Outlined.Delete,
                         contentDescription = stringResource(R.string.btn_delete_model),
                         tint = TextSecondary.copy(alpha = 0.5f),
                         modifier = Modifier.size(18.dp)
@@ -587,7 +586,7 @@ private fun ModelVersionRow(
                         .height(36.dp)
                 ) {
                     Icon(
-                        imageVector = Icons.Outlined.CloudDownload,
+                        painter = painterResource(id = R.drawable.ic_cloud_download),
                         contentDescription = null,
                         modifier = Modifier.size(16.dp)
                     )
