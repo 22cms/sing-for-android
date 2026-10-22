@@ -26,6 +26,7 @@ import android.view.View
 import android.view.ViewConfiguration
 import android.view.ViewGroup
 import android.widget.ImageView
+import android.widget.TextView
 import io.github.libxposed.api.XposedInterface
 import io.github.libxposed.api.XposedModule
 import io.github.libxposed.api.XposedModuleInterface
@@ -39,6 +40,7 @@ import java.lang.reflect.Executable
 import java.lang.reflect.Field
 import java.nio.ByteBuffer
 import java.util.zip.ZipFile
+import kotlin.math.roundToInt
 
 private class ExactSizeDrawable(
     private val delegate: Drawable,
@@ -216,7 +218,7 @@ class SingXposedEntry : XposedModule() {
             cachedVacClass?.let { updateVocalAttenuationFloor(it) }
             currentVocalCtrl?.get()?.let { updateSliderIcon(it) }
             lyricsRecyclerView?.get()?.let { rv ->
-                rv.post { instance?.updateLyricsBlur(rv) }
+                instance?.scheduleBlurUpdate(rv)
             }
         }
 
@@ -1907,84 +1909,81 @@ class SingXposedEntry : XposedModule() {
     private var isRecyclerViewHooked = false
     private val hookedViews: MutableSet<View> = java.util.Collections.newSetFromMap(java.util.WeakHashMap<View, Boolean>())
     private val hookedAdapters: MutableSet<String> = java.util.Collections.synchronizedSet(mutableSetOf<String>())
+    private val hookedGenericMotionClasses: MutableSet<Class<*>> = java.util.Collections.synchronizedSet(mutableSetOf())
+    private val hookedAutoScrollMethods: MutableSet<java.lang.reflect.Method> = java.util.Collections.synchronizedSet(mutableSetOf())
     private val adapterActiveMethods = java.util.concurrent.ConcurrentHashMap<Class<*>, java.lang.reflect.Method>()
 
-    @Volatile
-    private var isManualScrolling = false
+    private class LyricsBlurState {
+        var adapter: Any? = null
+        var song: Any? = null
+        var manual = false
+        var lastFocused: Int? = null
+        var tapped: Int? = null
+        var downX = 0f
+        var downY = 0f
+        var moved = false
+        var updateScheduled = false
+    }
+    private val lyricsBlurStates = java.util.WeakHashMap<ViewGroup, LyricsBlurState>()
+    private fun blurState(rv: ViewGroup) = lyricsBlurStates.getOrPut(rv) { LyricsBlurState() }
+    private fun scheduleBlurUpdate(rv: ViewGroup) {
+        val state = blurState(rv)
+        if (state.updateScheduled) return
+        state.updateScheduled = true
+        rv.postOnAnimation {
+            state.updateScheduled = false
+            if (rv.isAttachedToWindow) updateLyricsBlur(rv)
+        }
+    }
 
-    private val blurAnimators = java.util.WeakHashMap<View, android.animation.ValueAnimator>()
     private val currentBlurRadii = java.util.WeakHashMap<View, Float>()
     private val targetBlurRadii = java.util.WeakHashMap<View, Float>()
-    private val blurRadiusPx = 3.0f
-    private val blurTransitionMs = 150L
+    private val blurAnimators = java.util.WeakHashMap<View, android.animation.ValueAnimator>()
+    private val blurEffects = mutableMapOf<Int, RenderEffect>()
+    private val boundBlurPositions = java.util.WeakHashMap<View, Int>()
+    private val blurInterpolator = android.view.animation.PathInterpolator(0.4f, 0f, 0.2f, 1f)
 
-    private fun animateBlur(view: View, targetRadius: Float, durationMs: Long = blurTransitionMs) {
+    private fun renderBlur(view: View, radius: Float, scale: Float) {
+        // Still animate through at most 12 steps even when text on a phone is
+        // 3x larger; never clamp the *physical* radius back down to 12px.
+        val step = (radius / scale).roundToInt().coerceIn(0, 12)
+        // Quarter-pixel precision keeps the weaker 5-level blur proportional.
+        val effectKey = (step * scale * 4f).roundToInt()
+        val effectiveRadius = effectKey / 4f
+        val current = currentBlurRadii[view]
+        if (current == effectiveRadius) return
+        if (step == 0) {
+            // Keep zero as an explicit state. Removing it makes the next
+            // sharp -> blurred transition look like a first bind and snap.
+            currentBlurRadii[view] = 0f
+            if (current != null && current > 0f) view.setRenderEffect(null)
+        } else {
+            currentBlurRadii[view] = effectiveRadius
+            view.setRenderEffect(blurEffects.getOrPut(effectKey) {
+                RenderEffect.createBlurEffect(effectiveRadius, effectiveRadius, Shader.TileMode.CLAMP)
+            })
+        }
+    }
+
+    private fun setBlur(view: View, targetRadius: Float, scale: Float) {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) return
-
-        val currentRadius = currentBlurRadii[view]
-        if (currentRadius == null) {
-            // First time this view is seen: snap immediately to avoid initial flash
-            currentBlurRadii[view] = targetRadius
-            targetBlurRadii[view] = targetRadius
-            if (targetRadius <= 0.1f) {
-                view.setRenderEffect(null)
-            } else {
-                view.setRenderEffect(RenderEffect.createBlurEffect(targetRadius, targetRadius, Shader.TileMode.CLAMP))
-            }
-            return
-        }
-
-        // If an animation is already actively running towards this exact target radius, let it finish
-        val existingTarget = targetBlurRadii[view]
-        val existingAnimator = blurAnimators[view]
-        if (existingTarget != null && kotlin.math.abs(existingTarget - targetRadius) < 0.05f) {
-            if (existingAnimator?.isRunning == true) {
-                return
-            }
-            if (kotlin.math.abs(currentRadius - targetRadius) < 0.05f) {
-                return
-            }
-        }
-
-        existingAnimator?.cancel()
-        blurAnimators.remove(view)
+        if (targetBlurRadii[view] == targetRadius) return
         targetBlurRadii[view] = targetRadius
-
-        if (durationMs <= 0L || kotlin.math.abs(currentRadius - targetRadius) < 0.05f) {
-            currentBlurRadii[view] = targetRadius
-            if (targetRadius <= 0.1f) {
-                view.setRenderEffect(null)
-            } else {
-                view.setRenderEffect(RenderEffect.createBlurEffect(targetRadius, targetRadius, Shader.TileMode.CLAMP))
-            }
+        val previous = currentBlurRadii[view]
+        blurAnimators.remove(view)?.cancel()
+        if (previous == null || previous == targetRadius) {
+            renderBlur(view, targetRadius, scale)
             return
         }
-
-        val animator = android.animation.ValueAnimator.ofFloat(currentRadius, targetRadius).apply {
-            duration = durationMs
-            interpolator = android.view.animation.AccelerateDecelerateInterpolator()
-            addUpdateListener { animation ->
-                val r = animation.animatedValue as Float
-                currentBlurRadii[view] = r
-                if (r <= 0.1f) {
-                    view.setRenderEffect(null)
-                } else {
-                    view.setRenderEffect(RenderEffect.createBlurEffect(r, r, Shader.TileMode.CLAMP))
-                }
-            }
+        val animator = android.animation.ValueAnimator.ofFloat(previous, targetRadius).apply {
+            duration = 250L
+            interpolator = blurInterpolator
+            addUpdateListener { renderBlur(view, it.animatedValue as Float, scale) }
             addListener(object : android.animation.AnimatorListenerAdapter() {
                 override fun onAnimationEnd(animation: android.animation.Animator) {
+                    if (blurAnimators[view] !== animation) return
                     blurAnimators.remove(view)
-                    currentBlurRadii[view] = targetRadius
-                    if (targetRadius <= 0.1f) {
-                        view.setRenderEffect(null)
-                    } else {
-                        view.setRenderEffect(RenderEffect.createBlurEffect(targetRadius, targetRadius, Shader.TileMode.CLAMP))
-                    }
-                }
-
-                override fun onAnimationCancel(animation: android.animation.Animator) {
-                    blurAnimators.remove(view)
+                    renderBlur(view, targetRadius, scale)
                 }
             })
         }
@@ -1992,19 +1991,39 @@ class SingXposedEntry : XposedModule() {
         animator.start()
     }
 
-    private fun applyBlur(view: View, animate: Boolean = true) {
-        animateBlur(view, blurRadiusPx, if (animate) blurTransitionMs else 0L)
+    private fun resetViewBlur(view: View) {
+        blurAnimators.remove(view)?.cancel()
+        targetBlurRadii.remove(view)
+        if ((currentBlurRadii.remove(view) ?: 0f) > 0f && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            view.setRenderEffect(null)
+        }
     }
 
-    private fun clearBlur(view: View, animate: Boolean = true) {
-        animateBlur(view, 0f, if (animate) blurTransitionMs else 0L)
-    }
-
-    private fun clearAllChildrenBlur(rv: ViewGroup, animate: Boolean = true) {
+    private fun clearAllChildrenBlur(rv: ViewGroup, keepZeroState: Boolean = false) {
         for (i in 0 until rv.childCount) {
             val child = rv.getChildAt(i) ?: continue
-            clearBlur(child, animate)
+            resetViewBlur(child)
+            // A manual scroll must clear immediately, but the next automatic
+            // scroll should animate back from zero rather than snap on rebind.
+            if (keepZeroState) {
+                currentBlurRadii[child] = 0f
+                targetBlurRadii[child] = 0f
+            }
         }
+    }
+
+    private fun beginManualScroll(rv: ViewGroup) {
+        val state = blurState(rv)
+        if (state.manual) return
+        state.manual = true
+        state.tapped = null
+        // Clear synchronously, before a scrolling frame can draw a stale last row.
+        clearAllChildrenBlur(rv, keepZeroState = true)
+    }
+
+    private fun resumeAutoScroll(rv: ViewGroup) {
+        blurState(rv).manual = false
+        scheduleBlurUpdate(rv)
     }
 
     private fun getActivePositions(adapter: Any?): Set<Int>? {
@@ -2046,11 +2065,13 @@ class SingXposedEntry : XposedModule() {
     private var karaokeFlexId = 0
     private var karaokeBgFlexId = 0
     private var songLyricsLineId = 0
+    private var lyricsLineTextSizeId = 0
     private var songLyricsLineContainerId = 0
     private var writersCreditsLineId = 0
     private var instrumentalRootId = 0
     private var creditsBtnContainerId = 0
     private var lyricsMainContentId = 0
+    private var staticLyricsLineId = 0
 
     private fun resolveKaraokeResourceIds(res: android.content.res.Resources) {
         if (karaokeFlexId == 0) {
@@ -2061,6 +2082,9 @@ class SingXposedEntry : XposedModule() {
         }
         if (songLyricsLineId == 0) {
             songLyricsLineId = res.getIdentifier("song_lyrics_line", "id", TARGET_PACKAGE)
+        }
+        if (lyricsLineTextSizeId == 0) {
+            lyricsLineTextSizeId = res.getIdentifier("lyrics_line_text_size", "dimen", TARGET_PACKAGE)
         }
         if (songLyricsLineContainerId == 0) {
             songLyricsLineContainerId = res.getIdentifier("song_lyrics_line_container", "id", TARGET_PACKAGE)
@@ -2077,20 +2101,81 @@ class SingXposedEntry : XposedModule() {
         if (lyricsMainContentId == 0) {
             lyricsMainContentId = res.getIdentifier("lyrics_main_content", "id", TARGET_PACKAGE)
         }
+        if (staticLyricsLineId == 0) {
+            staticLyricsLineId = res.getIdentifier("static_lyrics_line", "id", TARGET_PACKAGE)
+        }
     }
 
-    private fun isEligibleLyricsRow(view: View): Boolean {
+    private fun isStaticLyrics(rv: ViewGroup): Boolean {
+        try {
+            resolveKaraokeResourceIds(rv.resources)
+        } catch (_: Throwable) {}
+
+        val rvTag = rv.tag?.toString() ?: ""
+        if (rvTag.contains("static", ignoreCase = true)) return true
+
+        for (i in 0 until rv.childCount) {
+            val child = rv.getChildAt(i) ?: continue
+            val tag = child.tag?.toString() ?: ""
+            if (tag.contains("static", ignoreCase = true)) return true
+            if (isStaticRow(child)) return true
+        }
+        return false
+    }
+
+    private fun isStaticRow(view: View): Boolean {
+        val tag = view.tag?.toString()
+        // The static-song adapter renders the entire unsynchronized text as a
+        // single multiline song_lyrics_line TextView. Data binding may remove
+        // its layout tag, so the ID/tag checks alone cannot identify it.
+        if (view is TextView && view.id == songLyricsLineId &&
+            view.text?.contains('\n') == true) return true
+        if (tag?.contains("lyrics_line_static", ignoreCase = true) == true ||
+            tag?.contains("lyrics_body", ignoreCase = true) == true ||
+            (staticLyricsLineId != 0 && view.id == staticLyricsLineId)) return true
+        if (view is ViewGroup) {
+            for (i in 0 until view.childCount) {
+                if (isStaticRow(view.getChildAt(i))) return true
+            }
+        }
+        return false
+    }
+
+    private fun isInstrumentalRow(view: View): Boolean {
         try {
             resolveKaraokeResourceIds(view.resources)
         } catch (_: Throwable) {}
 
         val tagStr = view.tag?.toString() ?: ""
-        if (tagStr.contains("instrumental", ignoreCase = true) ||
+        if (tagStr.contains("instrumental", ignoreCase = true)) return true
+        if (instrumentalRootId != 0 && (view.id == instrumentalRootId || view.findViewById<View>(instrumentalRootId) != null)) return true
+
+        if (view is ViewGroup) {
+            for (i in 0 until view.childCount) {
+                val c = view.getChildAt(i) ?: continue
+                val cName = try { view.resources.getResourceEntryName(c.id) } catch (_: Throwable) { "" }
+                if (cName.startsWith("dot")) {
+                    return true
+                }
+            }
+        }
+        return false
+    }
+
+    private fun isEligibleLyricsRow(view: View): Boolean {
+        if (isInstrumentalRow(view)) return false
+
+        try {
+            resolveKaraokeResourceIds(view.resources)
+        } catch (_: Throwable) {}
+
+        val tagStr = view.tag?.toString() ?: ""
+        if (isStaticRow(view) || tagStr.contains("static", ignoreCase = true) ||
             tagStr.contains("credit", ignoreCase = true) ||
             tagStr.contains("writer", ignoreCase = true)) {
             return false
         }
-        if (instrumentalRootId != 0 && (view.id == instrumentalRootId || view.findViewById<View>(instrumentalRootId) != null)) return false
+        if (staticLyricsLineId != 0 && (view.id == staticLyricsLineId || view.findViewById<View>(staticLyricsLineId) != null)) return false
         if (writersCreditsLineId != 0 && (view.id == writersCreditsLineId || view.findViewById<View>(writersCreditsLineId) != null)) return false
         if (creditsBtnContainerId != 0 && (view.id == creditsBtnContainerId || view.findViewById<View>(creditsBtnContainerId) != null)) return false
 
@@ -2098,7 +2183,7 @@ class SingXposedEntry : XposedModule() {
             for (i in 0 until view.childCount) {
                 val c = view.getChildAt(i) ?: continue
                 val cName = try { view.resources.getResourceEntryName(c.id) } catch (_: Throwable) { "" }
-                if (cName.startsWith("dot") || cName.contains("credit") || cName.contains("writer")) {
+                if (cName.contains("credit") || cName.contains("writer")) {
                     return false
                 }
             }
@@ -2112,42 +2197,102 @@ class SingXposedEntry : XposedModule() {
         return false
     }
 
+    private val rowPositionMethods = java.util.concurrent.ConcurrentHashMap<Class<*>, java.lang.reflect.Method>()
+    private fun rowPosition(rv: ViewGroup, child: View): Int = try {
+        // Apple Music's R8-renamed RecyclerView.M(View) is its public
+        // getChildAdapterPosition equivalent (it reads the attached holder).
+        val method = rowPositionMethods.getOrPut(rv.javaClass) {
+            try { rv.javaClass.getMethod("getChildAdapterPosition", View::class.java) }
+            catch (_: NoSuchMethodException) { rv.javaClass.getMethod("M", View::class.java) }
+        }
+        (method.invoke(if (java.lang.reflect.Modifier.isStatic(method.modifiers)) null else rv, child) as? Number)?.toInt() ?: -1
+    } catch (_: Throwable) { -1 }
+
     private fun updateLyricsBlur(rv: ViewGroup) {
         val blurEnabled = org.francasio.sing.provider.SingSettings.blurUnfocusedLyrics
-        if (!blurEnabled || isManualScrolling) {
-            clearAllChildrenBlur(rv, animate = true)
+        val state = blurState(rv)
+        val adapter = try { ReflectionUtils.callMethod(rv, "getAdapter") } catch (_: Throwable) { null }
+        // Apple Music's static-lyrics adapter binds an initially empty TextView
+        // and fills it *after* the row is attached. Row-text checks alone miss it.
+        val staticAdapter = adapter?.javaClass?.name == "com.apple.android.music.player.I"
+        if (!blurEnabled || staticAdapter || isStaticLyrics(rv)) {
+            clearAllChildrenBlur(rv)
+            return
+        }
+        if (state.manual) {
+            clearAllChildrenBlur(rv, keepZeroState = true)
             return
         }
 
-        val adapter = try { ReflectionUtils.callMethod(rv, "getAdapter") } catch (t: Throwable) { null } ?: return
+        if (adapter == null) return
+        if (state.adapter !== adapter) {
+            state.adapter = adapter
+            state.song = null
+            state.lastFocused = null
+            state.tapped = null
+        }
+        // The adapter is reused between tracks. Do not carry a previous track's
+        // last focused line into the next track's instrumental intro.
+        val song = try { resolveAdapterFields(adapter.javaClass).songInfo?.get(adapter) } catch (_: Throwable) { null }
+        if (song != null && state.song !== song) {
+            state.song = song
+            state.lastFocused = null
+            state.tapped = null
+        }
         val activePositions = getActivePositions(adapter) ?: emptySet()
-
+        val rows = mutableListOf<Int>()
+        val visible = mutableSetOf<Int>()
+        val attached = mutableListOf<Pair<View, Int>>()
+        var dots: Int? = null
+        val rvHeight = rv.height
         for (i in 0 until rv.childCount) {
             val child = rv.getChildAt(i) ?: continue
-            if (!isEligibleLyricsRow(child)) {
-                clearBlur(child, animate = false)
-                continue
-            }
-
-            val pos = try {
-                (ReflectionUtils.callMethod(rv, "getChildAdapterPosition", child) as? Number)?.toInt()
-                    ?: (ReflectionUtils.callMethod(rv, "getChildLayoutPosition", child) as? Number)?.toInt()
-                    ?: -1
-            } catch (t: Throwable) { -1 }
-
+            val pos = rowPosition(rv, child)
             if (pos < 0) continue
-
-            if (pos in activePositions) {
-                clearBlur(child, animate = true)
+            attached.add(child to pos)
+            if (isInstrumentalRow(child)) dots = pos
+            if (isEligibleLyricsRow(child)) {
+                rows.add(pos)
+                if (rvHeight > 0 && child.bottom > 0 && child.top < rvHeight) visible.add(pos)
+            }
+        }
+        // No eligible synchronized lines means static/credits/empty content.
+        if (rows.isEmpty()) {
+            clearAllChildrenBlur(rv); return
+        }
+        val focusedLyrics = activePositions.filterTo(mutableSetOf()) { it != dots }
+        if (state.tapped != null && state.tapped in focusedLyrics) state.tapped = null
+        if (focusedLyrics.isNotEmpty()) state.lastFocused = focusedLyrics.maxOrNull()
+        val reference = state.tapped ?: state.lastFocused ?: (rows.minOrNull()!! - 1)
+        val instrumentalBreak = state.tapped == null && dots != null && dots >= reference &&
+            (dots in activePositions || focusedLyrics.isEmpty())
+        val targets = LyricsBlurCascade.radii(rows, visible,
+            if (instrumentalBreak) emptySet() else focusedLyrics,
+            reference, if (instrumentalBreak) dots else null,
+            blurPreviousReference = instrumentalBreak && state.lastFocused != null)
+        val eligible = rows.toHashSet()
+        val textSizePx = if (lyricsLineTextSizeId != 0) {
+            try { rv.resources.getDimension(lyricsLineTextSizeId) }
+            catch (_: Throwable) { 32f }
+        } else 32f
+        val blurScale = LyricsBlurCascade.scaleForTextSize(textSizePx)
+        for ((child, pos) in attached) {
+            if (pos in eligible) {
+                // A lyric can leave the viewport during Apple's auto-scroll.
+                // Retarget it to zero instead of resetting its animator mid-fade.
+                setBlur(child, (targets[pos] ?: 0f) * blurScale, blurScale)
             } else {
-                applyBlur(child, animate = true)
+                resetViewBlur(child)
             }
         }
     }
 
-    private var adapterTtmlField: java.lang.reflect.Field? = null
-    private var adapterSongInfoField: java.lang.reflect.Field? = null
-    private var adapterSparseArrayField: java.lang.reflect.Field? = null
+    private data class AdapterFields(
+        val ttml: java.lang.reflect.Field?,
+        val songInfo: java.lang.reflect.Field?,
+        val sparseArray: java.lang.reflect.Field?
+    )
+    private val adapterFields = java.util.concurrent.ConcurrentHashMap<Class<*>, AdapterFields>()
 
     private fun findLyricsRecyclerView(v: View): View? {
         if (lyricsMainContentId == 0) {
@@ -2191,54 +2336,96 @@ class SingXposedEntry : XposedModule() {
 
         if (!hookedViews.add(rv)) return
 
-        rv.setOnTouchListener { _, event ->
-            when (event.actionMasked) {
-                android.view.MotionEvent.ACTION_MOVE -> {
-                    if (!isManualScrolling) {
-                        isManualScrolling = true
-                        rv.post { updateLyricsBlur(rv) }
-                    }
-                }
-            }
-            false
-        }
-
+        // The host's RecyclerView is loaded in a different class loader. An
+        // interface proxy can subscribe without casting it to our own copy.
         try {
-            val setScrollStateMethod = ReflectionUtils.findMethod(rv.javaClass, "setScrollState", java.lang.Integer.TYPE)
-            if (setScrollStateMethod != null) {
-                hookMethod(setScrollStateMethod) { chain ->
-                    val state = chain.getArg(0) as? Int ?: 0
-                    if (state == 1) { // SCROLL_STATE_DRAGGING
-                        if (!isManualScrolling) {
-                            isManualScrolling = true
-                            rv.post { updateLyricsBlur(rv) }
+            val addListener = rv.javaClass.methods.first { method ->
+                method.parameterTypes.size == 1 && method.returnType == java.lang.Void.TYPE &&
+                    method.parameterTypes[0].isInterface && method.parameterTypes[0].methods.any { callback ->
+                        callback.returnType == java.lang.Boolean.TYPE &&
+                            callback.parameterTypes.any { it == MotionEvent::class.java }
+                    }
+            }
+            val listenerType = addListener.parameterTypes[0]
+            val touchSlop = ViewConfiguration.get(rv.context).scaledTouchSlop
+            val listener = java.lang.reflect.Proxy.newProxyInstance(rv.javaClass.classLoader, arrayOf(listenerType)) { _, method, args ->
+                if (method.returnType == java.lang.Boolean.TYPE &&
+                    method.parameterTypes.any { it == MotionEvent::class.java }) {
+                    val event = args?.getOrNull(1) as? MotionEvent
+                    if (event != null) {
+                        val state = blurState(rv)
+                        when (event.actionMasked) {
+                            MotionEvent.ACTION_DOWN -> {
+                                state.downX = event.x; state.downY = event.y; state.moved = false
+                            }
+                            MotionEvent.ACTION_MOVE -> {
+                                if (!state.moved && (kotlin.math.abs(event.x - state.downX) > touchSlop ||
+                                        kotlin.math.abs(event.y - state.downY) > touchSlop)) {
+                                    state.moved = true
+                                    beginManualScroll(rv)
+                                }
+                            }
+                            MotionEvent.ACTION_UP -> {
+                                if (!state.moved) {
+                                    val child = try {
+                                        (ReflectionUtils.callMethod(rv, "findChildViewUnder", event.x, event.y)
+                                            ?: ReflectionUtils.callMethod(rv, "E", event.x, event.y)) as? View
+                                    } catch (_: Throwable) {
+                                        try { ReflectionUtils.callMethod(rv, "E", event.x, event.y) as? View }
+                                        catch (_: Throwable) { null }
+                                    }
+                                    if (child != null && isEligibleLyricsRow(child)) {
+                                        val pos = rowPosition(rv, child)
+                                        if (pos >= 0) {
+                                            state.tapped = pos; state.manual = false
+                                            updateLyricsBlur(rv)
+                                        }
+                                    }
+                                }
+                            }
+                            MotionEvent.ACTION_CANCEL -> state.moved = false
                         }
                     }
+                }
+                if (method.returnType == java.lang.Boolean.TYPE) false else null
+            }
+            addListener.invoke(rv, listener)
+        } catch (t: Throwable) { logError("Failed to attach lyrics touch listener", t) }
+
+        // Generic motion (wheel) bypasses touch listeners. Hook once per host
+        // RecyclerView class, without replacing its own listeners.
+        if (hookedGenericMotionClasses.add(rv.javaClass)) {
+            try {
+                hookMethod(rv.javaClass.getMethod("onGenericMotionEvent", MotionEvent::class.java)) { chain ->
+                    val target = chain.thisObject as? ViewGroup
+                    val event = chain.getArg(0) as? MotionEvent
+                    if (target != null && target in hookedViews && event?.actionMasked == MotionEvent.ACTION_SCROLL &&
+                        (event.getAxisValue(MotionEvent.AXIS_VSCROLL) != 0f ||
+                            event.getAxisValue(MotionEvent.AXIS_HSCROLL) != 0f)) beginManualScroll(target)
                     chain.proceed()
                 }
-            }
-        } catch (_: Throwable) {}
-
-        if (rv is androidx.recyclerview.widget.RecyclerView) {
-            rv.addOnScrollListener(object : androidx.recyclerview.widget.RecyclerView.OnScrollListener() {
-                override fun onScrollStateChanged(recyclerView: androidx.recyclerview.widget.RecyclerView, newState: Int) {
-                    if (newState == androidx.recyclerview.widget.RecyclerView.SCROLL_STATE_DRAGGING) {
-                        if (!isManualScrolling) {
-                            isManualScrolling = true
-                            recyclerView.post { updateLyricsBlur(recyclerView) }
-                        }
+            } catch (t: Throwable) { logError("Failed to hook lyrics mouse wheel", t) }
+            try {
+                // SCROLL_STATE_DRAGGING can also be entered by Apple Music's
+                // introductory auto-scroll. Only actual touch/wheel input may
+                // suppress blur; those are handled above.
+                ReflectionUtils.findMethod(rv.javaClass, "onScrolled", java.lang.Integer.TYPE, java.lang.Integer.TYPE)?.let { m ->
+                    hookMethod(m) { chain ->
+                        val result = chain.proceed()
+                        val target = chain.thisObject as? ViewGroup
+                        if (target != null && target in hookedViews) scheduleBlurUpdate(target)
+                        result
                     }
                 }
-            })
+            } catch (t: Throwable) { logError("Failed to hook lyrics scroll state", t) }
         }
 
         val scrollMethodNames = listOf("smoothScrollToPosition", "scrollToPosition", "smoothScrollBy")
         for (name in scrollMethodNames) {
             rv.javaClass.methods.filter { it.name == name }.forEach { m ->
                 hookMethod(m) { chain ->
-                    isManualScrolling = false
                     val res = chain.proceed()
-                    rv.post { updateLyricsBlur(rv) }
+                    resumeAutoScroll(rv)
                     res
                 }
             }
@@ -2275,7 +2462,7 @@ class SingXposedEntry : XposedModule() {
                         hookLyricsAdapter(newAdapter.javaClass)
                     }
                     val res = chain.proceed()
-                    rv.post { updateLyricsBlur(rv) }
+                    scheduleBlurUpdate(rv)
                     res
                 }
             }
@@ -2283,7 +2470,7 @@ class SingXposedEntry : XposedModule() {
             logError("Failed to hook RecyclerView.setAdapter: ${t.message}", t)
         }
 
-        rv.post { updateLyricsBlur(rv) }
+        scheduleBlurUpdate(rv)
     }
 
     private fun hookLayoutManager(lm: Any, rv: ViewGroup) {
@@ -2292,11 +2479,26 @@ class SingXposedEntry : XposedModule() {
         while (cur != null && cur != Any::class.java) {
             for (m in cur.declaredMethods) {
                 if (java.lang.reflect.Modifier.isAbstract(m.modifiers)) continue
+                // Apple Music's bundled, minified LinearLayoutManager uses u1
+                // for scrollToPositionWithOffset. This is the call made by
+                // PlayerLyricsViewFragment.K.b when it actually auto-scrolls,
+                // including when the introductory three dots become active.
+                if (m.name == "u1" && m.parameterTypes.contentEquals(arrayOf(java.lang.Integer.TYPE, java.lang.Integer.TYPE)) &&
+                    hookedAutoScrollMethods.add(m)) {
+                    hookMethod(m) { chain ->
+                        val res = chain.proceed()
+                        val currentRv = lyricsRecyclerView?.get()
+                        if (currentRv != null &&
+                            ReflectionUtils.callMethod(currentRv, "getLayoutManager") === chain.thisObject) {
+                            resumeAutoScroll(currentRv)
+                        }
+                        res
+                    }
+                }
                 if (m.name in lmScrollMethods) {
                     hookMethod(m) { chain ->
-                        isManualScrolling = false
                         val res = chain.proceed()
-                        rv.post { updateLyricsBlur(rv) }
+                        resumeAutoScroll(rv)
                         res
                     }
                 }
@@ -2327,19 +2529,12 @@ class SingXposedEntry : XposedModule() {
                     val itemView = (ReflectionUtils.getObjectField(holder, "itemView")
                         ?: ReflectionUtils.getObjectField(holder, "a")) as? View ?: return@hookMethod res
 
-                    // --- Blur logic (both line-by-line and word-by-word) ---
-                    if (!isEligibleLyricsRow(itemView)) {
-                        clearBlur(itemView, animate = false)
-                    } else if (!org.francasio.sing.provider.SingSettings.blurUnfocusedLyrics || isManualScrolling) {
-                        clearBlur(itemView, animate = false)
-                    } else {
-                        val activePositions = getActivePositions(adapter) ?: emptySet()
-                        if (position in activePositions) {
-                            clearBlur(itemView, animate = true)
-                        } else {
-                            applyBlur(itemView, animate = true)
-                        }
+                    // The holder may have been a blurred synchronized line before
+                    // being rebound as static lyrics or an instrumental row.
+                    if (boundBlurPositions.put(itemView, position) != position || !isEligibleLyricsRow(itemView)) {
+                        resetViewBlur(itemView)
                     }
+                    lyricsRecyclerView?.get()?.let { scheduleBlurUpdate(it) }
 
                     // --- Group lyrics centering (word-by-word only) ---
                     if (org.francasio.sing.provider.SingSettings.centerGroupLyrics && itemView is ViewGroup) {
@@ -2369,43 +2564,46 @@ class SingXposedEntry : XposedModule() {
             }
         }
 
-        // 2. Hook line-advance method O(List, int, Array) and auto-scroll method Q(boolean)
+        // 2. Hook line-advance method O(List, int, Array). Q(boolean)
+        // toggles an unrelated lyrics UI flag, not the host's auto-scroll.
         var cur: Class<*>? = adapterClass
         while (cur != null && cur != Any::class.java) {
             for (m in cur.declaredMethods) {
                 if (java.lang.reflect.Modifier.isAbstract(m.modifiers)) continue
-
-                if (m.name == "Q" && m.parameterTypes.size == 1 &&
-                    (m.parameterTypes[0] == java.lang.Boolean.TYPE || m.parameterTypes[0] == java.lang.Boolean::class.java)) {
-                    hookMethod(m) { chain ->
-                        val autoScroll = chain.getArg(0) as? Boolean ?: false
-                        if (autoScroll) {
-                            isManualScrolling = false
-                            lyricsRecyclerView?.get()?.let { rv ->
-                                rv.post { updateLyricsBlur(rv) }
-                            }
-                        }
-                        chain.proceed()
-                    }
-                }
 
                 if (m.parameterTypes.size == 3 &&
                     java.util.List::class.java.isAssignableFrom(m.parameterTypes[0]) &&
                     m.parameterTypes[1] == java.lang.Integer.TYPE &&
                     m.parameterTypes[2].isArray) {
                     hookMethod(m) { chain ->
-                        isManualScrolling = false
                         val res = chain.proceed()
-                        val active = getActivePositions(chain.thisObject)
-                        logInfo("Lyrics advance (O): activePositions=$active, isManualScrolling=$isManualScrolling")
                         lyricsRecyclerView?.get()?.let { rv ->
-                            rv.post { updateLyricsBlur(rv) }
+                            scheduleBlurUpdate(rv)
                         }
                         res
                     }
                 }
             }
             cur = cur.superclass
+        }
+
+        // 3. Hook onViewRecycled / onViewDetachedFromWindow (clear blur on views leaving window to save battery)
+        val detachMethods = adapterClass.methods.filter {
+            it.name == "onViewRecycled" || it.name == "onViewDetachedFromWindow"
+        }
+        for (m in detachMethods) {
+            hookMethod(m) { chain ->
+                val holder = chain.getArg(0)
+                if (holder != null) {
+                    val itemView = (ReflectionUtils.getObjectField(holder, "itemView")
+                        ?: ReflectionUtils.getObjectField(holder, "a")) as? View
+                    if (itemView != null) {
+                        boundBlurPositions.remove(itemView)
+                        resetViewBlur(itemView)
+                    }
+                }
+                chain.proceed()
+            }
         }
 
         // 4. Hook onAttachedToRecyclerView
@@ -2432,29 +2630,31 @@ class SingXposedEntry : XposedModule() {
         }
     }
 
-    private fun resolveAdapterFields(adapterClass: Class<*>) {
-        if (adapterTtmlField != null && adapterSongInfoField != null && adapterSparseArrayField != null) return
+    private fun resolveAdapterFields(adapterClass: Class<*>): AdapterFields = adapterFields.getOrPut(adapterClass) {
+        var ttml: java.lang.reflect.Field? = null
+        var songInfo: java.lang.reflect.Field? = null
+        var sparseArray: java.lang.reflect.Field? = null
         var cur: Class<*>? = adapterClass
         while (cur != null && cur != Any::class.java) {
             for (f in cur.declaredFields) {
-                f.isAccessible = true
                 val typeName = f.type.name
-                if (adapterSparseArrayField == null && android.util.SparseArray::class.java.isAssignableFrom(f.type)) {
-                    adapterSparseArrayField = f
-                } else if (adapterSongInfoField == null && typeName.contains("SongInfoPtr")) {
-                    adapterSongInfoField = f
-                } else if (adapterTtmlField == null && typeName.contains("com.apple.android.music.ttml")) {
-                    adapterTtmlField = f
+                if (sparseArray == null && android.util.SparseArray::class.java.isAssignableFrom(f.type)) {
+                    sparseArray = f.apply { isAccessible = true }
+                } else if (songInfo == null && typeName.contains("SongInfoPtr")) {
+                    songInfo = f.apply { isAccessible = true }
+                } else if (ttml == null && typeName.contains("com.apple.android.music.ttml")) {
+                    ttml = f.apply { isAccessible = true }
                 }
             }
             cur = cur.superclass
         }
+        AdapterFields(ttml, songInfo, sparseArray)
     }
 
     private fun isLineGroupAgent(adapter: Any, position: Int): Boolean {
         try {
-            resolveAdapterFields(adapter.javaClass)
-            val ttmlData = adapterTtmlField?.get(adapter)
+            val fields = resolveAdapterFields(adapter.javaClass)
+            val ttmlData = fields.ttml?.get(adapter)
                 ?: ReflectionUtils.callMethod(adapter, "x")
                 ?: ReflectionUtils.getObjectField(adapter, "p")
             if (ttmlData != null) {
@@ -2467,7 +2667,7 @@ class SingXposedEntry : XposedModule() {
 
                         var d0Type: String? = null
                         var d0Align: Int? = null
-                        val d0 = (adapterSparseArrayField?.get(adapter)
+                        val d0 = (fields.sparseArray?.get(adapter)
                             ?: ReflectionUtils.getObjectField(adapter, "d0")) as? android.util.SparseArray<*>
                         if (d0 != null && lineId >= 0) {
                             val itemInfo = d0.get(lineId)
@@ -2484,7 +2684,7 @@ class SingXposedEntry : XposedModule() {
                         }
 
                         var songInfoType: String? = null
-                        val songInfoPtr = adapterSongInfoField?.get(adapter)
+                        val songInfoPtr = fields.songInfo?.get(adapter)
                             ?: ReflectionUtils.callMethod(adapter, "y")
                             ?: ReflectionUtils.getObjectField(adapter, "o")
                         if (songInfoPtr != null && !agentId.isNullOrEmpty()) {
