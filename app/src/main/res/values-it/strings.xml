@@ -18,6 +18,8 @@
     <string name="desc_preserve_side">Usa un taglio spettrale del centro per conservare cori e riverbero stereo, mantenendoli udibili anche in mono.</string>
     <string name="setting_two_way_slider_title">Cursore a Due Vie</string>
     <string name="desc_two_way_slider" formatted="false">Divide il cursore Sing: 0–50% riduce le voci per il Karaoke, mentre 50–100% riduce la base musicale per isolare la voce (acapella).</string>
+    <string name="setting_center_group_lyrics_title">Centra Testi di Gruppo</string>
+    <string name="desc_center_group_lyrics">Centra orizzontalmente i versi cantati da cori o dal gruppo nei brani in duetto anziché allinearli a sinistra.</string>
     <string name="setting_full_vocal_mute_title">Rimuovi i Limiti del Cursore</string>
     <string name="setting_full_vocal_mute_desc" formatted="false">Rimuove il livello minimo di volume sul cursore Sing, e consente di impostarlo al 100% senza azionare la disattivazione di Sing.</string>
     <string name="setting_force_song_eligibility_title">Abilita per Tutti i Brani</string>

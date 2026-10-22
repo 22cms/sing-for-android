@@ -16,6 +16,8 @@ object SingSettings {
 
     const val KEY_PRESERVE_SIDE = "preserve_side"
     const val KEY_TWO_WAY_SLIDER = "two_way_slider"
+    const val KEY_CENTER_GROUP_LYRICS = "center_group_lyrics"
+    const val KEY_BLUR_UNFOCUSED_LYRICS = "blur_unfocused_lyrics"
     const val KEY_THREAD_COUNT = "thread_count"
     const val KEY_ECO_MODE = "eco_mode"
     const val KEY_HARDWARE_TARGET = "hardware_target"
@@ -82,6 +84,12 @@ object SingSettings {
     var twoWaySlider: Boolean = false
 
     @Volatile
+    var centerGroupLyrics: Boolean = true
+
+    @Volatile
+    var blurUnfocusedLyrics: Boolean = true
+
+    @Volatile
     var threadCount: Int = 4
 
     @Volatile
@@ -125,6 +133,8 @@ object SingSettings {
         val prefs = context.getSharedPreferences(PREFS_MODULE, Context.MODE_PRIVATE)
         preserveSide = prefs.getBoolean(KEY_PRESERVE_SIDE, false)
         twoWaySlider = prefs.getBoolean(KEY_TWO_WAY_SLIDER, false)
+        centerGroupLyrics = prefs.getBoolean(KEY_CENTER_GROUP_LYRICS, true)
+        blurUnfocusedLyrics = prefs.getBoolean(KEY_BLUR_UNFOCUSED_LYRICS, true)
         threadCount = prefs.getInt(KEY_THREAD_COUNT, 4)
         ecoMode = prefs.getBoolean(KEY_ECO_MODE, true)
         val savedTarget = prefs.getString(KEY_HARDWARE_TARGET, null)
@@ -219,6 +229,8 @@ object SingSettings {
         when (key) {
             KEY_PRESERVE_SIDE -> preserveSide = value
             KEY_TWO_WAY_SLIDER -> twoWaySlider = value
+            KEY_CENTER_GROUP_LYRICS -> centerGroupLyrics = value
+            KEY_BLUR_UNFOCUSED_LYRICS -> blurUnfocusedLyrics = value
             KEY_ECO_MODE -> ecoMode = value
             KEY_FORCE_CPU -> {
                 forceCpu = value
@@ -277,6 +289,8 @@ object SingSettings {
             }
             putExtra(KEY_PRESERVE_SIDE, preserveSide)
             putExtra(KEY_TWO_WAY_SLIDER, twoWaySlider)
+            putExtra(KEY_CENTER_GROUP_LYRICS, centerGroupLyrics)
+            putExtra(KEY_BLUR_UNFOCUSED_LYRICS, blurUnfocusedLyrics)
             putExtra(KEY_THREAD_COUNT, threadCount)
             putExtra(KEY_ECO_MODE, ecoMode)
             putExtra(KEY_HARDWARE_TARGET, hardwareTarget)
@@ -312,7 +326,7 @@ object SingSettings {
             val intent = createSettingsUpdateIntent(context)
             context.sendBroadcast(intent)
             val modelInfo = org.francasio.sing.util.ModelLoader.findCatalogModel(selectedModelId)
-            Log.i(TAG, "Broadcasted settings: preserveSide=$preserveSide, twoWaySlider=$twoWaySlider, threads=$threadCount, ecoMode=$ecoMode, target=$hardwareTarget (forceCpu=$forceCpu), model=$selectedModelId (${modelInfo?.fileName ?: "catalog entry not found"}), allowZeroFloor=$allowZeroFloor, forceSongEligibility=$forceSongEligibility")
+            Log.i(TAG, "Broadcasted settings: preserveSide=$preserveSide, twoWaySlider=$twoWaySlider, centerGroupLyrics=$centerGroupLyrics, threads=$threadCount, ecoMode=$ecoMode, target=$hardwareTarget (forceCpu=$forceCpu), model=$selectedModelId (${modelInfo?.fileName ?: "catalog entry not found"}), allowZeroFloor=$allowZeroFloor, forceSongEligibility=$forceSongEligibility")
         } catch (t: Throwable) {
             Log.w(TAG, "Failed to broadcast settings: ${t.message}")
         }
@@ -327,6 +341,8 @@ object SingSettings {
             if (bundle != null) {
                 preserveSide = bundle.getBoolean(KEY_PRESERVE_SIDE, preserveSide)
                 twoWaySlider = bundle.getBoolean(KEY_TWO_WAY_SLIDER, twoWaySlider)
+                centerGroupLyrics = bundle.getBoolean(KEY_CENTER_GROUP_LYRICS, centerGroupLyrics)
+                blurUnfocusedLyrics = bundle.getBoolean(KEY_BLUR_UNFOCUSED_LYRICS, blurUnfocusedLyrics)
                 threadCount = bundle.getInt(KEY_THREAD_COUNT, threadCount)
                 ecoMode = bundle.getBoolean(KEY_ECO_MODE, ecoMode)
                 val providerTarget = bundle.getString(KEY_HARDWARE_TARGET)
@@ -346,6 +362,8 @@ object SingSettings {
                     prefs.edit()
                         .putBoolean(KEY_PRESERVE_SIDE, preserveSide)
                         .putBoolean(KEY_TWO_WAY_SLIDER, twoWaySlider)
+                        .putBoolean(KEY_CENTER_GROUP_LYRICS, centerGroupLyrics)
+                        .putBoolean(KEY_BLUR_UNFOCUSED_LYRICS, blurUnfocusedLyrics)
                         .putInt(KEY_THREAD_COUNT, threadCount)
                         .putBoolean(KEY_ECO_MODE, ecoMode)
                         .putString(KEY_HARDWARE_TARGET, hardwareTarget)
@@ -430,6 +448,8 @@ object SingSettings {
     private fun handleSettingsUpdate(ctx: Context, intent: Intent) {
         val newPreserveSide = intent.getBooleanExtra(KEY_PRESERVE_SIDE, preserveSide)
         val newTwoWaySlider = intent.getBooleanExtra(KEY_TWO_WAY_SLIDER, twoWaySlider)
+        val newCenterGroupLyrics = intent.getBooleanExtra(KEY_CENTER_GROUP_LYRICS, centerGroupLyrics)
+        val newBlurUnfocusedLyrics = intent.getBooleanExtra(KEY_BLUR_UNFOCUSED_LYRICS, blurUnfocusedLyrics)
         val newThreadCount = intent.getIntExtra(KEY_THREAD_COUNT, threadCount)
         val newEcoMode = intent.getBooleanExtra(KEY_ECO_MODE, ecoMode)
         val newTarget = intent.getStringExtra(KEY_HARDWARE_TARGET) ?: (if (intent.getBooleanExtra(KEY_FORCE_CPU, forceCpu)) TARGET_CPU else TARGET_NPU)
@@ -443,6 +463,8 @@ object SingSettings {
         }
         preserveSide = newPreserveSide
         twoWaySlider = newTwoWaySlider
+        centerGroupLyrics = newCenterGroupLyrics
+        blurUnfocusedLyrics = newBlurUnfocusedLyrics
         threadCount = newThreadCount
         ecoMode = newEcoMode
         hardwareTarget = newTarget
@@ -480,6 +502,8 @@ object SingSettings {
             prefs.edit()
                 .putBoolean(KEY_PRESERVE_SIDE, newPreserveSide)
                 .putBoolean(KEY_TWO_WAY_SLIDER, newTwoWaySlider)
+                .putBoolean(KEY_CENTER_GROUP_LYRICS, newCenterGroupLyrics)
+                .putBoolean(KEY_BLUR_UNFOCUSED_LYRICS, newBlurUnfocusedLyrics)
                 .putInt(KEY_THREAD_COUNT, newThreadCount)
                 .putBoolean(KEY_ECO_MODE, newEcoMode)
                 .putString(KEY_HARDWARE_TARGET, newTarget)
@@ -505,6 +529,8 @@ object SingSettings {
             val prefs = context.getSharedPreferences(PREFS_CACHE, Context.MODE_PRIVATE)
             preserveSide = prefs.getBoolean(KEY_PRESERVE_SIDE, false)
             twoWaySlider = prefs.getBoolean(KEY_TWO_WAY_SLIDER, false)
+            centerGroupLyrics = prefs.getBoolean(KEY_CENTER_GROUP_LYRICS, true)
+            blurUnfocusedLyrics = prefs.getBoolean(KEY_BLUR_UNFOCUSED_LYRICS, true)
             threadCount = prefs.getInt(KEY_THREAD_COUNT, 4)
             ecoMode = prefs.getBoolean(KEY_ECO_MODE, true)
             val cachedTarget = prefs.getString(KEY_HARDWARE_TARGET, null)

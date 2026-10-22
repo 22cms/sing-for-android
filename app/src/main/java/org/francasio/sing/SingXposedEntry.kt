@@ -8,9 +8,12 @@ import android.content.pm.ApplicationInfo
 import android.graphics.Canvas
 import android.graphics.ColorFilter
 import android.graphics.Rect
+import android.graphics.RenderEffect
+import android.graphics.Shader
 import android.graphics.drawable.BitmapDrawable
 import android.graphics.drawable.Drawable
 import android.graphics.drawable.GradientDrawable
+import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
@@ -65,7 +68,13 @@ private class ExactSizeDrawable(
  */
 class SingXposedEntry : XposedModule() {
 
+    init {
+        instance = this
+    }
+
     companion object {
+        var instance: SingXposedEntry? = null
+        var lyricsRecyclerView: WeakReference<ViewGroup>? = null
         private const val TAG = "AppleMusicSing"
         private const val TARGET_PACKAGE = "com.apple.android.music"
         private var audioProcessor: SingAudioProcessor? = null
@@ -206,6 +215,9 @@ class SingXposedEntry : XposedModule() {
             }
             cachedVacClass?.let { updateVocalAttenuationFloor(it) }
             currentVocalCtrl?.get()?.let { updateSliderIcon(it) }
+            lyricsRecyclerView?.get()?.let { rv ->
+                rv.post { instance?.updateLyricsBlur(rv) }
+            }
         }
 
         fun getVocalSliderFraction(vocalCtrl: View): Float {
@@ -732,6 +744,8 @@ class SingXposedEntry : XposedModule() {
             org.francasio.sing.provider.SingSettings.twoWaySlider = prefs.getBoolean(org.francasio.sing.provider.SingSettings.KEY_TWO_WAY_SLIDER, false)
             org.francasio.sing.provider.SingSettings.preserveSide = prefs.getBoolean(org.francasio.sing.provider.SingSettings.KEY_PRESERVE_SIDE, false)
             org.francasio.sing.provider.SingSettings.forceSongEligibility = prefs.getBoolean(org.francasio.sing.provider.SingSettings.KEY_FORCE_SONG_ELIGIBILITY, true)
+            org.francasio.sing.provider.SingSettings.centerGroupLyrics = prefs.getBoolean(org.francasio.sing.provider.SingSettings.KEY_CENTER_GROUP_LYRICS, true)
+            org.francasio.sing.provider.SingSettings.blurUnfocusedLyrics = prefs.getBoolean(org.francasio.sing.provider.SingSettings.KEY_BLUR_UNFOCUSED_LYRICS, true)
         } catch (_: Throwable) {}
 
         // Schedule async initialization when the main looper is idle or after cold-start UI renders
@@ -1401,8 +1415,38 @@ class SingXposedEntry : XposedModule() {
                     hookMethod(onCreateView) { chain ->
                         currentLyricsFragment = WeakReference(chain.thisObject)
                         val view = chain.proceed() as? View
+                        val frag = chain.thisObject
+                        try {
+                            for (field in frag.javaClass.declaredFields) {
+                                field.isAccessible = true
+                                val value = field.get(frag) ?: continue
+                                if (value is androidx.recyclerview.widget.RecyclerView.Adapter<*>) {
+                                    hookLyricsAdapter(value.javaClass)
+                                } else {
+                                    var cur: Class<*>? = value.javaClass
+                                    while (cur != null && cur != Any::class.java) {
+                                        if (cur.name.contains("Adapter")) {
+                                            hookLyricsAdapter(value.javaClass)
+                                            break
+                                        }
+                                        cur = cur.superclass
+                                    }
+                                }
+                            }
+                        } catch (_: Throwable) {}
                         if (view != null) {
                             currentLyricsView = WeakReference(view)
+                            view.post {
+                                try {
+                                    val rv = findLyricsRecyclerView(view)
+                                    logInfo("findLyricsRecyclerView in onCreateView: rv=$rv")
+                                    if (rv != null) {
+                                        hookLyricsRecyclerView(rv)
+                                    }
+                                } catch (t: Throwable) {
+                                    logInfo("Failed to resolve lyrics adapter from RecyclerView: ${t.message}")
+                                }
+                            }
                             val vocalId = view.resources.getIdentifier("vocal_ctrl", "id", TARGET_PACKAGE)
                             if (vocalId != 0) {
                                 val vocalCtrl = view.findViewById<View>(vocalId)
@@ -1750,6 +1794,12 @@ class SingXposedEntry : XposedModule() {
         } catch (e: Throwable) {
             logError("Failed to hook VocalAttenuationControl", e)
         }
+
+        listOf("com.apple.android.music.player.x", "com.apple.android.music.player.y").forEach { name ->
+            try {
+                ReflectionUtils.findClass(name, cl)?.let { hookLyricsAdapter(it) }
+            } catch (_: Throwable) {}
+        }
     }
 
     /**
@@ -1851,6 +1901,646 @@ class SingXposedEntry : XposedModule() {
             (getMethod.invoke(null, key) as? String)?.trim() ?: ""
         } catch (_: Throwable) {
             ""
+        }
+    }
+
+    private var isRecyclerViewHooked = false
+    private val hookedViews: MutableSet<View> = java.util.Collections.newSetFromMap(java.util.WeakHashMap<View, Boolean>())
+    private val hookedAdapters: MutableSet<String> = java.util.Collections.synchronizedSet(mutableSetOf<String>())
+    private val adapterActiveMethods = java.util.concurrent.ConcurrentHashMap<Class<*>, java.lang.reflect.Method>()
+
+    @Volatile
+    private var isManualScrolling = false
+
+    private val blurAnimators = java.util.WeakHashMap<View, android.animation.ValueAnimator>()
+    private val currentBlurRadii = java.util.WeakHashMap<View, Float>()
+    private val targetBlurRadii = java.util.WeakHashMap<View, Float>()
+    private val blurRadiusPx = 3.0f
+    private val blurTransitionMs = 150L
+
+    private fun animateBlur(view: View, targetRadius: Float, durationMs: Long = blurTransitionMs) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) return
+
+        val currentRadius = currentBlurRadii[view]
+        if (currentRadius == null) {
+            // First time this view is seen: snap immediately to avoid initial flash
+            currentBlurRadii[view] = targetRadius
+            targetBlurRadii[view] = targetRadius
+            if (targetRadius <= 0.1f) {
+                view.setRenderEffect(null)
+            } else {
+                view.setRenderEffect(RenderEffect.createBlurEffect(targetRadius, targetRadius, Shader.TileMode.CLAMP))
+            }
+            return
+        }
+
+        // If an animation is already actively running towards this exact target radius, let it finish
+        val existingTarget = targetBlurRadii[view]
+        val existingAnimator = blurAnimators[view]
+        if (existingTarget != null && kotlin.math.abs(existingTarget - targetRadius) < 0.05f) {
+            if (existingAnimator?.isRunning == true) {
+                return
+            }
+            if (kotlin.math.abs(currentRadius - targetRadius) < 0.05f) {
+                return
+            }
+        }
+
+        existingAnimator?.cancel()
+        blurAnimators.remove(view)
+        targetBlurRadii[view] = targetRadius
+
+        if (durationMs <= 0L || kotlin.math.abs(currentRadius - targetRadius) < 0.05f) {
+            currentBlurRadii[view] = targetRadius
+            if (targetRadius <= 0.1f) {
+                view.setRenderEffect(null)
+            } else {
+                view.setRenderEffect(RenderEffect.createBlurEffect(targetRadius, targetRadius, Shader.TileMode.CLAMP))
+            }
+            return
+        }
+
+        val animator = android.animation.ValueAnimator.ofFloat(currentRadius, targetRadius).apply {
+            duration = durationMs
+            interpolator = android.view.animation.AccelerateDecelerateInterpolator()
+            addUpdateListener { animation ->
+                val r = animation.animatedValue as Float
+                currentBlurRadii[view] = r
+                if (r <= 0.1f) {
+                    view.setRenderEffect(null)
+                } else {
+                    view.setRenderEffect(RenderEffect.createBlurEffect(r, r, Shader.TileMode.CLAMP))
+                }
+            }
+            addListener(object : android.animation.AnimatorListenerAdapter() {
+                override fun onAnimationEnd(animation: android.animation.Animator) {
+                    blurAnimators.remove(view)
+                    currentBlurRadii[view] = targetRadius
+                    if (targetRadius <= 0.1f) {
+                        view.setRenderEffect(null)
+                    } else {
+                        view.setRenderEffect(RenderEffect.createBlurEffect(targetRadius, targetRadius, Shader.TileMode.CLAMP))
+                    }
+                }
+
+                override fun onAnimationCancel(animation: android.animation.Animator) {
+                    blurAnimators.remove(view)
+                }
+            })
+        }
+        blurAnimators[view] = animator
+        animator.start()
+    }
+
+    private fun applyBlur(view: View, animate: Boolean = true) {
+        animateBlur(view, blurRadiusPx, if (animate) blurTransitionMs else 0L)
+    }
+
+    private fun clearBlur(view: View, animate: Boolean = true) {
+        animateBlur(view, 0f, if (animate) blurTransitionMs else 0L)
+    }
+
+    private fun clearAllChildrenBlur(rv: ViewGroup, animate: Boolean = true) {
+        for (i in 0 until rv.childCount) {
+            val child = rv.getChildAt(i) ?: continue
+            clearBlur(child, animate)
+        }
+    }
+
+    private fun getActivePositions(adapter: Any?): Set<Int>? {
+        if (adapter == null) return null
+        try {
+            val adapterClass = adapter.javaClass
+            var method = adapterActiveMethods[adapterClass]
+            if (method == null) {
+                var cur: Class<*>? = adapterClass
+                while (cur != null && cur != Any::class.java) {
+                    for (m in cur.declaredMethods) {
+                        if (m.parameterTypes.isEmpty() && java.util.Set::class.java.isAssignableFrom(m.returnType)) {
+                            m.isAccessible = true
+                            adapterActiveMethods[adapterClass] = m
+                            method = m
+                            break
+                        }
+                    }
+                    if (method != null) break
+                    cur = cur.superclass
+                }
+            }
+            val set = method?.invoke(adapter) as? Set<*>
+            if (set != null) {
+                val result = mutableSetOf<Int>()
+                for (item in set) {
+                    if (item is Number) {
+                        result.add(item.toInt())
+                    }
+                }
+                return result
+            }
+        } catch (t: Throwable) {
+            logError("Failed to get active positions from adapter: ${t.message}", t)
+        }
+        return null
+    }
+
+    private var karaokeFlexId = 0
+    private var karaokeBgFlexId = 0
+    private var songLyricsLineId = 0
+    private var songLyricsLineContainerId = 0
+    private var writersCreditsLineId = 0
+    private var instrumentalRootId = 0
+    private var creditsBtnContainerId = 0
+    private var lyricsMainContentId = 0
+
+    private fun resolveKaraokeResourceIds(res: android.content.res.Resources) {
+        if (karaokeFlexId == 0) {
+            karaokeFlexId = res.getIdentifier("karaoke_line_flexbox", "id", TARGET_PACKAGE)
+        }
+        if (karaokeBgFlexId == 0) {
+            karaokeBgFlexId = res.getIdentifier("karaoke_line_flexbox_background_pronunciation", "id", TARGET_PACKAGE)
+        }
+        if (songLyricsLineId == 0) {
+            songLyricsLineId = res.getIdentifier("song_lyrics_line", "id", TARGET_PACKAGE)
+        }
+        if (songLyricsLineContainerId == 0) {
+            songLyricsLineContainerId = res.getIdentifier("song_lyrics_line_container", "id", TARGET_PACKAGE)
+        }
+        if (writersCreditsLineId == 0) {
+            writersCreditsLineId = res.getIdentifier("writers_credits_line", "id", TARGET_PACKAGE)
+        }
+        if (instrumentalRootId == 0) {
+            instrumentalRootId = res.getIdentifier("lyrics_instrumental_root", "id", TARGET_PACKAGE)
+        }
+        if (creditsBtnContainerId == 0) {
+            creditsBtnContainerId = res.getIdentifier("credits_lyrics_button_container", "id", TARGET_PACKAGE)
+        }
+        if (lyricsMainContentId == 0) {
+            lyricsMainContentId = res.getIdentifier("lyrics_main_content", "id", TARGET_PACKAGE)
+        }
+    }
+
+    private fun isEligibleLyricsRow(view: View): Boolean {
+        try {
+            resolveKaraokeResourceIds(view.resources)
+        } catch (_: Throwable) {}
+
+        val tagStr = view.tag?.toString() ?: ""
+        if (tagStr.contains("instrumental", ignoreCase = true) ||
+            tagStr.contains("credit", ignoreCase = true) ||
+            tagStr.contains("writer", ignoreCase = true)) {
+            return false
+        }
+        if (instrumentalRootId != 0 && (view.id == instrumentalRootId || view.findViewById<View>(instrumentalRootId) != null)) return false
+        if (writersCreditsLineId != 0 && (view.id == writersCreditsLineId || view.findViewById<View>(writersCreditsLineId) != null)) return false
+        if (creditsBtnContainerId != 0 && (view.id == creditsBtnContainerId || view.findViewById<View>(creditsBtnContainerId) != null)) return false
+
+        if (view is ViewGroup) {
+            for (i in 0 until view.childCount) {
+                val c = view.getChildAt(i) ?: continue
+                val cName = try { view.resources.getResourceEntryName(c.id) } catch (_: Throwable) { "" }
+                if (cName.startsWith("dot") || cName.contains("credit") || cName.contains("writer")) {
+                    return false
+                }
+            }
+        }
+
+        if (songLyricsLineContainerId != 0 && view.id == songLyricsLineContainerId) return true
+        if (songLyricsLineId != 0 && view.findViewById<View>(songLyricsLineId) != null) return true
+        if (karaokeFlexId != 0 && view.findViewById<View>(karaokeFlexId) != null) return true
+        if (tagStr.contains("lyrics_line", ignoreCase = true)) return true
+
+        return false
+    }
+
+    private fun updateLyricsBlur(rv: ViewGroup) {
+        val blurEnabled = org.francasio.sing.provider.SingSettings.blurUnfocusedLyrics
+        if (!blurEnabled || isManualScrolling) {
+            clearAllChildrenBlur(rv, animate = true)
+            return
+        }
+
+        val adapter = try { ReflectionUtils.callMethod(rv, "getAdapter") } catch (t: Throwable) { null } ?: return
+        val activePositions = getActivePositions(adapter) ?: emptySet()
+
+        for (i in 0 until rv.childCount) {
+            val child = rv.getChildAt(i) ?: continue
+            if (!isEligibleLyricsRow(child)) {
+                clearBlur(child, animate = false)
+                continue
+            }
+
+            val pos = try {
+                (ReflectionUtils.callMethod(rv, "getChildAdapterPosition", child) as? Number)?.toInt()
+                    ?: (ReflectionUtils.callMethod(rv, "getChildLayoutPosition", child) as? Number)?.toInt()
+                    ?: -1
+            } catch (t: Throwable) { -1 }
+
+            if (pos < 0) continue
+
+            if (pos in activePositions) {
+                clearBlur(child, animate = true)
+            } else {
+                applyBlur(child, animate = true)
+            }
+        }
+    }
+
+    private var adapterTtmlField: java.lang.reflect.Field? = null
+    private var adapterSongInfoField: java.lang.reflect.Field? = null
+    private var adapterSparseArrayField: java.lang.reflect.Field? = null
+
+    private fun findLyricsRecyclerView(v: View): View? {
+        if (lyricsMainContentId == 0) {
+            try {
+                lyricsMainContentId = v.resources.getIdentifier("lyrics_main_content", "id", TARGET_PACKAGE)
+            } catch (_: Throwable) {}
+        }
+        if (lyricsMainContentId != 0) {
+            val found = v.findViewById<View>(lyricsMainContentId)
+            if (found != null) return found
+        }
+        if (v.javaClass.name.contains("RecyclerView") || v.javaClass.superclass?.name?.contains("RecyclerView") == true) return v
+        if (v is ViewGroup) {
+            for (i in 0 until v.childCount) {
+                val found = findLyricsRecyclerView(v.getChildAt(i))
+                if (found != null) return found
+            }
+        }
+        return null
+    }
+
+    private fun hookLyricsRecyclerView(rv: View) {
+        logInfo("hookLyricsRecyclerView called: rv=${rv.javaClass.name}, id=${rv.id}")
+        if (rv !is ViewGroup) return
+
+        if (lyricsMainContentId == 0) {
+            try {
+                lyricsMainContentId = rv.resources.getIdentifier("lyrics_main_content", "id", TARGET_PACKAGE)
+            } catch (_: Throwable) {}
+        }
+        if (lyricsMainContentId != 0 && rv.id != lyricsMainContentId) {
+            logInfo("Ignoring non-lyrics RecyclerView: id=${rv.id}, target=$lyricsMainContentId")
+            return
+        }
+
+        lyricsRecyclerView = WeakReference(rv)
+        val currentAdapter = ReflectionUtils.callMethod(rv, "getAdapter")
+        if (currentAdapter != null) {
+            hookLyricsAdapter(currentAdapter.javaClass)
+        }
+
+        if (!hookedViews.add(rv)) return
+
+        rv.setOnTouchListener { _, event ->
+            when (event.actionMasked) {
+                android.view.MotionEvent.ACTION_MOVE -> {
+                    if (!isManualScrolling) {
+                        isManualScrolling = true
+                        rv.post { updateLyricsBlur(rv) }
+                    }
+                }
+            }
+            false
+        }
+
+        try {
+            val setScrollStateMethod = ReflectionUtils.findMethod(rv.javaClass, "setScrollState", java.lang.Integer.TYPE)
+            if (setScrollStateMethod != null) {
+                hookMethod(setScrollStateMethod) { chain ->
+                    val state = chain.getArg(0) as? Int ?: 0
+                    if (state == 1) { // SCROLL_STATE_DRAGGING
+                        if (!isManualScrolling) {
+                            isManualScrolling = true
+                            rv.post { updateLyricsBlur(rv) }
+                        }
+                    }
+                    chain.proceed()
+                }
+            }
+        } catch (_: Throwable) {}
+
+        if (rv is androidx.recyclerview.widget.RecyclerView) {
+            rv.addOnScrollListener(object : androidx.recyclerview.widget.RecyclerView.OnScrollListener() {
+                override fun onScrollStateChanged(recyclerView: androidx.recyclerview.widget.RecyclerView, newState: Int) {
+                    if (newState == androidx.recyclerview.widget.RecyclerView.SCROLL_STATE_DRAGGING) {
+                        if (!isManualScrolling) {
+                            isManualScrolling = true
+                            recyclerView.post { updateLyricsBlur(recyclerView) }
+                        }
+                    }
+                }
+            })
+        }
+
+        val scrollMethodNames = listOf("smoothScrollToPosition", "scrollToPosition", "smoothScrollBy")
+        for (name in scrollMethodNames) {
+            rv.javaClass.methods.filter { it.name == name }.forEach { m ->
+                hookMethod(m) { chain ->
+                    isManualScrolling = false
+                    val res = chain.proceed()
+                    rv.post { updateLyricsBlur(rv) }
+                    res
+                }
+            }
+        }
+
+        try {
+            val lm = ReflectionUtils.callMethod(rv, "getLayoutManager")
+            if (lm != null) {
+                hookLayoutManager(lm, rv)
+            }
+            val setLayoutManagerMethod = rv.javaClass.methods.firstOrNull {
+                it.name == "setLayoutManager" && it.parameterTypes.size == 1
+            }
+            if (setLayoutManagerMethod != null) {
+                hookMethod(setLayoutManagerMethod) { chain ->
+                    val newLm = chain.getArg(0)
+                    if (newLm != null) {
+                        hookLayoutManager(newLm, rv)
+                    }
+                    chain.proceed()
+                }
+            }
+        } catch (_: Throwable) {}
+
+        try {
+            val setAdapterMethod = rv.javaClass.methods.firstOrNull { m ->
+                m.name == "setAdapter" && m.parameterTypes.size == 1 &&
+                    (m.parameterTypes[0].name.contains("Adapter") || m.parameterTypes[0] == Any::class.java)
+            }
+            if (setAdapterMethod != null) {
+                hookMethod(setAdapterMethod) { chain ->
+                    val newAdapter = chain.getArg(0)
+                    if (newAdapter != null) {
+                        hookLyricsAdapter(newAdapter.javaClass)
+                    }
+                    val res = chain.proceed()
+                    rv.post { updateLyricsBlur(rv) }
+                    res
+                }
+            }
+        } catch (t: Throwable) {
+            logError("Failed to hook RecyclerView.setAdapter: ${t.message}", t)
+        }
+
+        rv.post { updateLyricsBlur(rv) }
+    }
+
+    private fun hookLayoutManager(lm: Any, rv: ViewGroup) {
+        val lmScrollMethods = listOf("smoothScrollToPosition", "scrollToPosition", "scrollToPositionWithOffset", "startSmoothScroll")
+        var cur: Class<*>? = lm.javaClass
+        while (cur != null && cur != Any::class.java) {
+            for (m in cur.declaredMethods) {
+                if (java.lang.reflect.Modifier.isAbstract(m.modifiers)) continue
+                if (m.name in lmScrollMethods) {
+                    hookMethod(m) { chain ->
+                        isManualScrolling = false
+                        val res = chain.proceed()
+                        rv.post { updateLyricsBlur(rv) }
+                        res
+                    }
+                }
+            }
+            cur = cur.superclass
+        }
+    }
+
+    private fun hookLyricsAdapter(adapterClass: Class<*>) {
+        if (!hookedAdapters.add(adapterClass.name)) return
+        logInfo("hookLyricsAdapter: successfully registered ${adapterClass.name}")
+
+        // 1. Hook onBindViewHolder (blur and group centering)
+        val bindMethods = adapterClass.declaredMethods.filter { m ->
+            !java.lang.reflect.Modifier.isAbstract(m.modifiers) &&
+                m.parameterTypes.size == 2 &&
+                m.parameterTypes[1] == java.lang.Integer.TYPE &&
+                (m.name == "k" || m.name == "onBindViewHolder" || m.returnType == java.lang.Void.TYPE)
+        }
+        for (m in bindMethods) {
+            hookMethod(m) { chain ->
+                val res = chain.proceed()
+                try {
+                    val adapter = chain.thisObject
+                    val holder = chain.getArg(0) ?: return@hookMethod res
+                    val position = chain.getArg(1) as? Int ?: return@hookMethod res
+
+                    val itemView = (ReflectionUtils.getObjectField(holder, "itemView")
+                        ?: ReflectionUtils.getObjectField(holder, "a")) as? View ?: return@hookMethod res
+
+                    // --- Blur logic (both line-by-line and word-by-word) ---
+                    if (!isEligibleLyricsRow(itemView)) {
+                        clearBlur(itemView, animate = false)
+                    } else if (!org.francasio.sing.provider.SingSettings.blurUnfocusedLyrics || isManualScrolling) {
+                        clearBlur(itemView, animate = false)
+                    } else {
+                        val activePositions = getActivePositions(adapter) ?: emptySet()
+                        if (position in activePositions) {
+                            clearBlur(itemView, animate = true)
+                        } else {
+                            applyBlur(itemView, animate = true)
+                        }
+                    }
+
+                    // --- Group lyrics centering (word-by-word only) ---
+                    if (org.francasio.sing.provider.SingSettings.centerGroupLyrics && itemView is ViewGroup) {
+                        resolveKaraokeResourceIds(itemView.resources)
+                        val flexboxes = mutableListOf<View>()
+                        if (karaokeFlexId != 0) {
+                            itemView.findViewById<View>(karaokeFlexId)?.let { flexboxes.add(it) }
+                        }
+                        if (karaokeBgFlexId != 0) {
+                            itemView.findViewById<View>(karaokeBgFlexId)?.let { flexboxes.add(it) }
+                        }
+                        if (flexboxes.isEmpty()) {
+                            findFlexboxViews(itemView, flexboxes)
+                        }
+
+                        // Only process word-synced karaoke lines containing flexboxes
+                        if (flexboxes.isNotEmpty() && isLineGroupAgent(adapter, position)) {
+                            for (flex in flexboxes) {
+                                centerFlexboxView(flex)
+                            }
+                        }
+                    }
+                } catch (t: Throwable) {
+                    logError("Failed to process lyrics row bind: ${t.message}", t)
+                }
+                res
+            }
+        }
+
+        // 2. Hook line-advance method O(List, int, Array) and auto-scroll method Q(boolean)
+        var cur: Class<*>? = adapterClass
+        while (cur != null && cur != Any::class.java) {
+            for (m in cur.declaredMethods) {
+                if (java.lang.reflect.Modifier.isAbstract(m.modifiers)) continue
+
+                if (m.name == "Q" && m.parameterTypes.size == 1 &&
+                    (m.parameterTypes[0] == java.lang.Boolean.TYPE || m.parameterTypes[0] == java.lang.Boolean::class.java)) {
+                    hookMethod(m) { chain ->
+                        val autoScroll = chain.getArg(0) as? Boolean ?: false
+                        if (autoScroll) {
+                            isManualScrolling = false
+                            lyricsRecyclerView?.get()?.let { rv ->
+                                rv.post { updateLyricsBlur(rv) }
+                            }
+                        }
+                        chain.proceed()
+                    }
+                }
+
+                if (m.parameterTypes.size == 3 &&
+                    java.util.List::class.java.isAssignableFrom(m.parameterTypes[0]) &&
+                    m.parameterTypes[1] == java.lang.Integer.TYPE &&
+                    m.parameterTypes[2].isArray) {
+                    hookMethod(m) { chain ->
+                        isManualScrolling = false
+                        val res = chain.proceed()
+                        val active = getActivePositions(chain.thisObject)
+                        logInfo("Lyrics advance (O): activePositions=$active, isManualScrolling=$isManualScrolling")
+                        lyricsRecyclerView?.get()?.let { rv ->
+                            rv.post { updateLyricsBlur(rv) }
+                        }
+                        res
+                    }
+                }
+            }
+            cur = cur.superclass
+        }
+
+        // 4. Hook onAttachedToRecyclerView
+        val attachMethods = adapterClass.methods.filter {
+            it.name == "onAttachedToRecyclerView" ||
+            (it.parameterTypes.size == 1 && it.parameterTypes[0].name.contains("RecyclerView"))
+        }
+        for (m in attachMethods) {
+            hookMethod(m) { chain ->
+                val rv = chain.getArg(0) as? ViewGroup
+                if (rv != null) {
+                    if (lyricsMainContentId == 0) {
+                        try {
+                            lyricsMainContentId = rv.resources.getIdentifier("lyrics_main_content", "id", TARGET_PACKAGE)
+                        } catch (_: Throwable) {}
+                    }
+                    if (lyricsMainContentId == 0 || rv.id == lyricsMainContentId) {
+                        lyricsRecyclerView = WeakReference(rv)
+                        hookLyricsRecyclerView(rv)
+                    }
+                }
+                chain.proceed()
+            }
+        }
+    }
+
+    private fun resolveAdapterFields(adapterClass: Class<*>) {
+        if (adapterTtmlField != null && adapterSongInfoField != null && adapterSparseArrayField != null) return
+        var cur: Class<*>? = adapterClass
+        while (cur != null && cur != Any::class.java) {
+            for (f in cur.declaredFields) {
+                f.isAccessible = true
+                val typeName = f.type.name
+                if (adapterSparseArrayField == null && android.util.SparseArray::class.java.isAssignableFrom(f.type)) {
+                    adapterSparseArrayField = f
+                } else if (adapterSongInfoField == null && typeName.contains("SongInfoPtr")) {
+                    adapterSongInfoField = f
+                } else if (adapterTtmlField == null && typeName.contains("com.apple.android.music.ttml")) {
+                    adapterTtmlField = f
+                }
+            }
+            cur = cur.superclass
+        }
+    }
+
+    private fun isLineGroupAgent(adapter: Any, position: Int): Boolean {
+        try {
+            resolveAdapterFields(adapter.javaClass)
+            val ttmlData = adapterTtmlField?.get(adapter)
+                ?: ReflectionUtils.callMethod(adapter, "x")
+                ?: ReflectionUtils.getObjectField(adapter, "p")
+            if (ttmlData != null) {
+                val linePtr = ReflectionUtils.callMethod(ttmlData, "a", position)
+                if (linePtr != null) {
+                    val lineNative = ReflectionUtils.callMethod(linePtr, "get")
+                    if (lineNative != null) {
+                        val agentId = ReflectionUtils.callMethod(lineNative, "getAgent") as? String
+                        val lineId = ReflectionUtils.callMethod(lineNative, "getLineId") as? Int ?: -1
+
+                        var d0Type: String? = null
+                        var d0Align: Int? = null
+                        val d0 = (adapterSparseArrayField?.get(adapter)
+                            ?: ReflectionUtils.getObjectField(adapter, "d0")) as? android.util.SparseArray<*>
+                        if (d0 != null && lineId >= 0) {
+                            val itemInfo = d0.get(lineId)
+                            if (itemInfo != null) {
+                                for (f in itemInfo.javaClass.declaredFields) {
+                                    f.isAccessible = true
+                                    if (f.type.isEnum) {
+                                        d0Type = f.get(itemInfo)?.toString()
+                                    } else if (f.type == java.lang.Integer.TYPE && d0Align == null) {
+                                        d0Align = f.getInt(itemInfo)
+                                    }
+                                }
+                            }
+                        }
+
+                        var songInfoType: String? = null
+                        val songInfoPtr = adapterSongInfoField?.get(adapter)
+                            ?: ReflectionUtils.callMethod(adapter, "y")
+                            ?: ReflectionUtils.getObjectField(adapter, "o")
+                        if (songInfoPtr != null && !agentId.isNullOrEmpty()) {
+                            val songInfoNative = ReflectionUtils.callMethod(songInfoPtr, "get")
+                            if (songInfoNative != null) {
+                                val agentPtr = ReflectionUtils.callMethod(songInfoNative, "getAgent", agentId)
+                                if (agentPtr != null) {
+                                    val agentNative = ReflectionUtils.callMethod(agentPtr, "get")
+                                    if (agentNative != null) {
+                                        songInfoType = ReflectionUtils.callMethod(agentNative, "getType")?.toString()
+                                    }
+                                }
+                            }
+                        }
+
+                        val isGroup = agentId == "v1000" ||
+                            songInfoType.equals("Group", ignoreCase = true) ||
+                            d0Type.equals("Group", ignoreCase = true) ||
+                            d0Align == 1
+
+                        return isGroup
+                    }
+                }
+            }
+        } catch (t: Throwable) {
+            logError("isLineGroupAgent error at pos $position: ${t.message}", t)
+        }
+        return false
+    }
+
+    private fun centerFlexboxView(view: View) {
+        try {
+            ReflectionUtils.callMethod(view, "setJustifyContent", 2)
+        } catch (_: Throwable) {}
+
+        val lp = view.layoutParams
+        if (lp != null) {
+            try {
+                val biasField = ReflectionUtils.findField(lp.javaClass, "horizontalBias")
+                    ?: ReflectionUtils.findField(lp.javaClass, "E")
+                    ?: lp.javaClass.fields.firstOrNull { it.name == "horizontalBias" || (it.type == java.lang.Float.TYPE && it.modifiers and java.lang.reflect.Modifier.STATIC == 0) }
+                biasField?.set(lp, 0.5f)
+                view.layoutParams = lp
+                view.requestLayout()
+            } catch (_: Throwable) {}
+        }
+    }
+
+    private fun findFlexboxViews(viewGroup: ViewGroup, out: MutableList<View>) {
+        for (i in 0 until viewGroup.childCount) {
+            val child = viewGroup.getChildAt(i) ?: continue
+            if (child.javaClass.name.contains("FlexboxLayout")) {
+                out.add(child)
+            } else if (child is ViewGroup) {
+                findFlexboxViews(child, out)
+            }
         }
     }
 }

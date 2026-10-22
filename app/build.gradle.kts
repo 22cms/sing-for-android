@@ -111,6 +111,7 @@ android {
     buildTypes {
         getByName("debug") {
             signingConfig = chosenSigning
+            isCrunchPngs = false
         }
 
         getByName("release") {
@@ -139,6 +140,7 @@ android {
     kotlin {
         compilerOptions {
             jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17)
+            freeCompilerArgs.addAll("-Xbackend-threads=0")
         }
     }
 
