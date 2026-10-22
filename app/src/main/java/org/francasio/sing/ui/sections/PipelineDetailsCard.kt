@@ -199,9 +199,19 @@ fun PipelineDetailsCard(
                         else -> "Alibaba MNN v3.6.1"
                     }
                 )
+                // The NPU/HTP backends force FP16 execution. Libraries do not report
+                // on-the-fly quantization, so we infer it from an FP32 model running
+                // on an NPU target (ONNX QNN HTP / MNN QNN).
+                val precisionConverted = remember(currentModel, hardwareTarget, isOnnxModel) {
+                    currentModel != null &&
+                        currentModel.precision.equals("FP32", ignoreCase = true) &&
+                        hardwareTarget == SingSettings.TARGET_NPU &&
+                        (isOnnxModel || currentModel.isMnn)
+                }
                 PipelineSpecRow(
                     label = stringResource(id = R.string.label_compute_precision),
-                    value = currentModel?.precision?.uppercase() ?: "FP16"
+                    value = if (precisionConverted) "FP32→FP16" else (currentModel?.precision?.uppercase() ?: "FP16"),
+                    valueColor = if (precisionConverted) Color(0xFFFFB74D) else TextPrimary
                 )
 
                 val isHardwareFallback = remember(hardwareTarget, activeProvider) {
