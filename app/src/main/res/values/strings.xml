@@ -19,7 +19,7 @@
     <!-- Sing Settings -->
     <string name="title_sing_settings">Sing Settings</string>
     <string name="setting_preserve_side_title">Preserve Vocal Side Channel</string>
-    <string name="desc_preserve_side">Subtracts only Mid channel vocals, preserving backing vocals, stereo reverb, and vocoder widening.</string>
+    <string name="desc_preserve_side">Uses a spectral center cut to preserve stereo backing vocals and reverb while keeping the sides audible in mono.</string>
 
     <string name="setting_two_way_slider_title">Two-Way Slider Mode</string>
     <string name="desc_two_way_slider" formatted="false">Splits the Sing slider range: 0–50% lowers vocals for Karaoke, while 50–100% lowers instrumentals to isolate vocals (acapella).</string>
@@ -59,6 +59,10 @@
     <string name="downloading_qnn_accelerator">Downloading QNN Accelerator…</string>
     <string name="extracting_qnn_accelerator">Extracting QNN Accelerator…</string>
     <string name="downloading">Downloading…</string>
+    <string name="module_version_mismatch">Module version mismatch</string>
+    <string name="module_version_label">App: %1$s\nModule: %2$s</string>
+    <string name="module_version_unknown">Unknown</string>
+    <string name="tip_version_mismatch">Force-close or repatch the Apple Music app to update the in-app engine.</string>
     <string name="benchmark_rtf_format">%1$.2fx Real-Time</string>
     <string name="benchmark_failed">Benchmark failed</string>
     <string name="benchmark_details_format" translatable="false">Chunk Processing: %1$d ms (Audio Window: 5,921 ms) • STFT (KissFFT 6144): %2$d ms • NN Inference (%3$s): %4$d ms • iSTFT Synthesis: %5$d ms</string>

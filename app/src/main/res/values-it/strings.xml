@@ -15,7 +15,7 @@
     <string name="badge_recommended">Consigliato</string>
     <string name="title_sing_settings">Impostazioni di Sing</string>
     <string name="setting_preserve_side_title">Conserva le Voci sui Canali Side</string>
-    <string name="desc_preserve_side">Rimuove soltanto le voci sul canale Mid, conservando le voci di accompagnamento, riverbero, e widening del vocoder.</string>
+    <string name="desc_preserve_side">Usa un taglio spettrale del centro per conservare cori e riverbero stereo, mantenendoli udibili anche in mono.</string>
     <string name="setting_two_way_slider_title">Cursore a Due Vie</string>
     <string name="desc_two_way_slider" formatted="false">Divide il cursore Sing: 0–50% riduce le voci per il Karaoke, mentre 50–100% riduce la base musicale per isolare la voce (acapella).</string>
     <string name="setting_full_vocal_mute_title">Rimuovi i Limiti del Cursore</string>
@@ -42,6 +42,10 @@
     <string name="btn_run_benchmark">Avvia Benchmark d\'Inferenza</string>
     <string name="btn_benchmarking">Benchmark in corso...</string>
     <string name="label_processing_speed">Velocità di Elaborazione</string>
+    <string name="module_version_mismatch">Versione modulo non corrispondente</string>
+    <string name="module_version_label">App: %1$s\nModulo: %2$s</string>
+    <string name="module_version_unknown">Sconosciuta</string>
+    <string name="tip_version_mismatch">Chiudi forzatamente o riapplica la patch all\'app Apple Music per aggiornare il motore in-app.</string>
     <string name="benchmark_rtf_format">%1$.2fx Tempo Reale</string>
     <string name="benchmark_failed">Benchmark fallito</string>
     <string name="downloading_onnx_runtime">Download ONNX Runtime in corso…</string>

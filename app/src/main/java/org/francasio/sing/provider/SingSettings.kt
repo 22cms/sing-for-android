@@ -65,6 +65,7 @@ object SingSettings {
 
     const val KEY_HEARTBEAT_TIME = "heartbeat_time"
     const val KEY_HEARTBEAT_MANAGER = "heartbeat_manager"
+    private const val KEY_HEARTBEAT_ENGINE_VERSION = "heartbeat_engine_version"
 
     const val METHOD_GET_SETTINGS = "getSettings"
     const val METHOD_SET_SETTING = "setSetting"
@@ -138,6 +139,7 @@ object SingSettings {
         backTipLearned = prefs.getBoolean(KEY_BACK_TIP_LEARNED, false)
         lastHeartbeatTime = prefs.getLong(KEY_HEARTBEAT_TIME, 0L)
         lastHeartbeatManager = prefs.getString(KEY_HEARTBEAT_MANAGER, null)
+        moduleVersion = prefs.getString(KEY_HEARTBEAT_ENGINE_VERSION, null)
         activeProvider = prefs.getString(KEY_ACTIVE_PROVIDER, "") ?: ""
     }
 
@@ -148,13 +150,18 @@ object SingSettings {
     @Volatile
     var moduleReachable: Boolean = false
 
+    @Volatile
+    var moduleVersion: String? = null
+
     fun saveHeartbeat(
         context: Context,
         timestamp: Long,
         manager: String? = null,
-        activeProvider: String? = null
+        activeProvider: String? = null,
+        engineVersion: String? = null
     ) {
         lastHeartbeatTime = timestamp
+        moduleVersion = engineVersion?.takeIf { it.isNotBlank() }
         if (manager != null) {
             lastHeartbeatManager = manager
         }
@@ -164,6 +171,7 @@ object SingSettings {
         try {
             val prefs = context.getSharedPreferences(PREFS_MODULE, Context.MODE_PRIVATE)
             val editor = prefs.edit().putLong(KEY_HEARTBEAT_TIME, timestamp)
+                .putString(KEY_HEARTBEAT_ENGINE_VERSION, moduleVersion)
             if (manager != null) {
                 editor.putString(KEY_HEARTBEAT_MANAGER, manager)
             }
@@ -381,6 +389,7 @@ object SingSettings {
                 val uri = Uri.parse("content://org.francasio.sing.provider")
                 val extras = Bundle().apply {
                     putLong("timestamp", System.currentTimeMillis())
+                    putString("engine_version", ENGINE_VERSION)
                     if (managerInfo != null) {
                         putString("manager_info", managerInfo)
                     }
@@ -398,6 +407,7 @@ object SingSettings {
                 val req = Intent(ACTION_REQUEST_SETTINGS).apply {
                     setPackage("org.francasio.sing")
                     putExtra("timestamp", System.currentTimeMillis())
+                    putExtra("engine_version", ENGINE_VERSION)
                     putExtra("caller_package", context.packageName)
                     if (managerInfo != null) {
                         putExtra("manager_info", managerInfo)

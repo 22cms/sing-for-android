@@ -9,6 +9,8 @@ constexpr float TWO_PI = 6.28318530717958647692f;
 
 StftEngine::StftEngine() : stop_(false), active_tasks_(0) {
     init_tables();
+    center_forward_ = kiss_fftr_alloc(2048, 0, nullptr, nullptr);
+    center_inverse_ = kiss_fftr_alloc(2048, 1, nullptr, nullptr);
 
     for (int w = 0; w < NUM_STFT_WORKERS; ++w) {
         cfgs_forward_[w] = kiss_fftr_alloc(N_FFT, 0, nullptr, nullptr);
@@ -59,6 +61,92 @@ StftEngine::~StftEngine() {
             kiss_fftr_free(cfgs_inverse_[w]);
             cfgs_inverse_[w] = nullptr;
         }
+    }
+    kiss_fftr_free(center_forward_);
+    kiss_fftr_free(center_inverse_);
+}
+
+// JamesDSP-style center estimate, with a quadrature side copy mixed into the
+// residual. A plain L-R residual has zero mono sum; rotating the side by 90
+// degrees gives it a mono component without favoring the left or right channel.
+// DC/Nyquist cannot be rotated (they must remain real).
+static void center_cut_bin(float lr, float li, float rr, float ri,
+                           float mono_gain, float& out_r, float& out_i) {
+    const float sum_r = lr + rr, sum_i = li + ri;
+    const float diff_r = lr - rr, diff_i = li - ri;
+    const float sum_sq = sum_r * sum_r + sum_i * sum_i;
+    const float diff_sq = diff_r * diff_r + diff_i * diff_i;
+    const float ratio = std::sqrt(diff_sq / std::max(sum_sq, 1e-12f));
+    const float alpha = 0.5f * (1.0f - std::min(1.0f, ratio));
+    // Side = (L-R)/2; i * Side = (-ImSide, ReSide).
+    out_r = alpha * sum_r + mono_gain * 0.5f * diff_i;
+    out_i = alpha * sum_i - mono_gain * 0.5f * diff_r;
+}
+
+void StftEngine::centerCutTensor(float* tensor, int num_bins) {
+    if (num_bins <= 0 || num_bins > MAX_N_BINS) return;
+    const int plane = num_bins * N_FRAMES;
+    for (int bin = 0; bin < num_bins; ++bin) {
+        const float gain = (bin == 0 || bin == N_FFT / 2) ? 0.0f : 0.85f;
+        for (int frame = 0; frame < N_FRAMES; ++frame) {
+            const int i = bin * N_FRAMES + frame;
+            float r, im;
+            center_cut_bin(tensor[i], tensor[plane + i],
+                           tensor[2 * plane + i], tensor[3 * plane + i], gain, r, im);
+            tensor[i] = tensor[2 * plane + i] = r;
+            tensor[plane + i] = tensor[3 * plane + i] = im;
+        }
+    }
+}
+
+void StftEngine::centerCutPcm(const float* pcm, float* out, int frames) {
+    constexpr int fft = 2048, hop = 512, pad = fft / 2;
+    if (frames <= 1) return;
+    const int padded = frames + 2 * pad;
+    std::vector<float> input[2] = {std::vector<float>(padded), std::vector<float>(padded)};
+    std::vector<float> accum(padded, 0.0f), norm(padded, 0.0f);
+    std::vector<float> fin(fft), fout(fft);
+    std::vector<float> window(fft);
+    for (int n = 0; n < fft; ++n) {
+        window[n] = 0.5f * (1.0f - std::cos(TWO_PI * n / fft));
+    }
+    std::vector<kiss_fft_cpx> left(pad + 1), right(pad + 1), center(pad + 1);
+    for (int ch = 0; ch < 2; ++ch) {
+        for (int i = 0; i < padded; ++i) {
+            int pos = i - pad;
+            // Reflect at both ends (same boundary convention as model STFT).
+            while (pos < 0 || pos >= frames) {
+                if (pos < 0) pos = -pos;
+                if (pos >= frames) pos = 2 * frames - 2 - pos;
+            }
+            input[ch][i] = pcm[2 * pos + ch];
+        }
+    }
+    for (int start = 0; start + fft <= padded; start += hop) {
+        for (int n = 0; n < fft; ++n) {
+            fin[n] = input[0][start + n] * window[n];
+        }
+        kiss_fftr(center_forward_, fin.data(), left.data());
+        for (int n = 0; n < fft; ++n) {
+            fin[n] = input[1][start + n] * window[n];
+        }
+        kiss_fftr(center_forward_, fin.data(), right.data());
+        for (int bin = 0; bin <= pad; ++bin) {
+            const float gain = (bin == 0 || bin == pad) ? 0.0f : 0.85f;
+            center_cut_bin(left[bin].r, left[bin].i, right[bin].r, right[bin].i,
+                           gain, center[bin].r, center[bin].i);
+        }
+        kiss_fftri(center_inverse_, center.data(), fout.data());
+        for (int n = 0; n < fft; ++n) {
+            accum[start + n] += fout[n] * window[n];
+            norm[start + n] += window[n] * window[n];
+        }
+    }
+    for (int i = 0; i < frames; ++i) {
+        const int s = pad + i;
+        // kiss_fftri is unnormalized; identical mono center in both channels.
+        const float v = norm[s] > 1e-8f ? accum[s] / (norm[s] * fft) : 0.0f;
+        out[2 * i] = out[2 * i + 1] = std::isfinite(v) ? v : 0.0f;
     }
 }
 

@@ -23,7 +23,6 @@ class SingSettingsProvider : ContentProvider() {
         return when (method) {
             SingSettings.METHOD_GET_SETTINGS -> {
                 SingSettings.loadLocal(ctx)
-                SingSettings.saveHeartbeat(ctx, System.currentTimeMillis())
                 Bundle().apply {
                     putBoolean(SingSettings.KEY_PRESERVE_SIDE, SingSettings.preserveSide)
                     putBoolean(SingSettings.KEY_TWO_WAY_SLIDER, SingSettings.twoWaySlider)
@@ -44,7 +43,8 @@ class SingSettingsProvider : ContentProvider() {
                 val ts = extras?.getLong("timestamp", System.currentTimeMillis()) ?: System.currentTimeMillis()
                 val manager = extras?.getString("manager_info")
                 val activeProvider = extras?.getString("active_provider")
-                SingSettings.saveHeartbeat(ctx, ts, manager, activeProvider)
+                val engineVersion = extras?.getString("engine_version")
+                SingSettings.saveHeartbeat(ctx, ts, manager, activeProvider, engineVersion)
                 Bundle().apply { putBoolean("success", true) }
             }
             SingSettings.METHOD_SET_SETTING -> {

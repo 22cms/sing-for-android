@@ -102,6 +102,18 @@ class StftEngine : AutoCloseable {
         nativeInverse(nativeHandle, inTensor, outStereoPcm, numBins)
     }
 
+    fun centerCutTensor(tensor: FloatArray, numBins: Int) {
+        check(nativeHandle != 0L) { "StftEngine is closed" }
+        require(tensor.size >= 4 * numBins * N_FRAMES)
+        nativeCenterCutTensor(nativeHandle, tensor, numBins)
+    }
+
+    fun centerCutPcm(pcm: FloatArray, out: FloatArray, frames: Int) {
+        check(nativeHandle != 0L) { "StftEngine is closed" }
+        require(frames > 1 && pcm.size >= frames * 2 && out.size >= frames * 2)
+        nativeCenterCutPcm(nativeHandle, pcm, out, frames)
+    }
+
     override fun close() {
         if (nativeHandle != 0L) {
             nativeDestroy(nativeHandle)
@@ -113,4 +125,6 @@ class StftEngine : AutoCloseable {
     private external fun nativeDestroy(handle: Long)
     private external fun nativeForward(handle: Long, stereoPcm: FloatArray, outTensor: FloatArray, numBins: Int)
     private external fun nativeInverse(handle: Long, inTensor: FloatArray, outStereoPcm: FloatArray, numBins: Int)
+    private external fun nativeCenterCutTensor(handle: Long, tensor: FloatArray, numBins: Int)
+    private external fun nativeCenterCutPcm(handle: Long, pcm: FloatArray, out: FloatArray, frames: Int)
 }

@@ -18,6 +18,7 @@ val DefaultCardElevated = Color(0xFF1E1E24)
 val DefaultTextPrimary = Color(0xFFFFFFFF)
 val DefaultTextSecondary = Color(0xFF9E9EA4)
 val DefaultDividerDark = Color(0xFF2C2C32)
+val DefaultYellowError = Color(0xFFFFB74D)
 
 // Dynamic theme accessors that adapt to MaterialTheme (e.g. Material You)
 val Primary: Color
@@ -79,3 +80,4 @@ val DividerDark: Color
     @Composable
     @ReadOnlyComposable
     get() = MaterialTheme.colorScheme.outlineVariant
+

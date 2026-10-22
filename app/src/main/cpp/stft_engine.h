@@ -46,6 +46,13 @@ public:
     // Zero-pads bins num_bins..3072, applies Hermitian symmetry, exact window sum division and compensation.
     void inverse(const float* in_tensor, float* out_stereo_pcm, int num_bins = DEFAULT_N_BINS);
 
+    // Replace a stereo vocal spectrum with the mono component to subtract.
+    // The side is retained in stereo and a quadrature copy survives mono downmix.
+    void centerCutTensor(float* vocal_tensor, int num_bins);
+
+    // Equivalent operation for time-domain model output (one 4096-frame block).
+    void centerCutPcm(const float* vocal_pcm, float* center_pcm, int frames);
+
 private:
     std::vector<float> window_;
     std::vector<float> ola_inv_norm_;
@@ -54,6 +61,8 @@ private:
 
     kiss_fftr_cfg cfgs_forward_[NUM_STFT_WORKERS]{};
     kiss_fftr_cfg cfgs_inverse_[NUM_STFT_WORKERS]{};
+    kiss_fftr_cfg center_forward_{};
+    kiss_fftr_cfg center_inverse_{};
 
     std::vector<float> worker_fin_r_[NUM_STFT_WORKERS];
     std::vector<kiss_fft_cpx> worker_fout_c_[NUM_STFT_WORKERS];

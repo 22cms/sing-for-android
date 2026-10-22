@@ -66,7 +66,6 @@ class MainActivity : ComponentActivity() {
 
     private val bgExecutor = Executors.newSingleThreadExecutor()
     private val isModuleLoadedState = mutableStateOf(false)
-    private val xposedManagerInfoState = mutableStateOf("")
     private val selectedModelIdState = mutableStateOf(SingSettings.DEFAULT_MODEL_ID)
     private val currentScreenState = mutableStateOf(AppScreen.MAIN)
     private val openedFromMusicState = mutableStateOf(false)
@@ -79,6 +78,10 @@ class MainActivity : ComponentActivity() {
     private val threadCountState = mutableIntStateOf(4)
     private val materialYouState = mutableStateOf(true)
     private val benchmarkState = mutableStateOf(BenchmarkUiState())
+    private val isModuleVersionMismatchState = mutableStateOf(false)
+    private val appVersionState = mutableStateOf("")
+    private val moduleVersionState = mutableStateOf("")
+    private val xposedManagerInfoState = mutableStateOf("")
     private val showRuntimeDownloadDialogState = mutableStateOf(false)
     private val runtimeDownloadLabelState = mutableStateOf("")
     private val runtimeDownloadProgressState = mutableFloatStateOf(0f)
@@ -113,18 +116,22 @@ class MainActivity : ComponentActivity() {
         }
 
         isModuleLoadedState.value = XposedStatus.isModuleActive(this)
+        isModuleVersionMismatchState.value = XposedStatus.isModuleVersionMismatch(this)
+        appVersionState.value = "v${XposedStatus.getAppVersion(this)}"
+        moduleVersionState.value = XposedStatus.getModuleVersion(this)
         xposedManagerInfoState.value = XposedStatus.getEffectiveManagerInfo(this)
 
         XposedStatus.initServiceListener {
             runOnUiThread {
                 isModuleLoadedState.value = XposedStatus.isModuleActive(this)
+                isModuleVersionMismatchState.value = XposedStatus.isModuleVersionMismatch(this)
+                moduleVersionState.value = XposedStatus.getModuleVersion(this)
                 xposedManagerInfoState.value = XposedStatus.getEffectiveManagerInfo(this)
             }
         }
 
         setContent {
             val isModuleLoaded by isModuleLoadedState
-            val xposedManagerInfo by xposedManagerInfoState
             val selectedModelId by selectedModelIdState
             val currentScreen by currentScreenState
             val openedFromMusic by openedFromMusicState
@@ -137,6 +144,10 @@ class MainActivity : ComponentActivity() {
             val threadCount by threadCountState
             val materialYou by materialYouState
             val currentBenchmarkState by benchmarkState
+            val isModuleVersionMismatch by isModuleVersionMismatchState
+            val appVersion by appVersionState
+            val moduleVersion by moduleVersionState
+            val xposedManagerInfo by xposedManagerInfoState
 
             var scrollToSelectedOnOpen by remember { mutableStateOf(false) }
             var backProgress by remember { mutableFloatStateOf(0f) }
@@ -208,6 +219,9 @@ class MainActivity : ComponentActivity() {
                 Box(modifier = Modifier.fillMaxSize()) {
                     MainScreen(
                         isModuleLoaded = isModuleLoaded,
+                        isModuleVersionMismatch = isModuleVersionMismatch,
+                        appVersion = appVersion,
+                        moduleVersion = moduleVersion,
                         xposedManagerInfo = xposedManagerInfo,
                         preserveSide = preserveSide,
                         twoWaySlider = twoWaySlider,
@@ -572,6 +586,9 @@ class MainActivity : ComponentActivity() {
             }
         }
         isModuleLoadedState.value = XposedStatus.isModuleActive(this)
+        isModuleVersionMismatchState.value = XposedStatus.isModuleVersionMismatch(this)
+        appVersionState.value = "v${XposedStatus.getAppVersion(this)}"
+        moduleVersionState.value = XposedStatus.getModuleVersion(this)
         xposedManagerInfoState.value = XposedStatus.getEffectiveManagerInfo(this)
         checkRunBenchmarkIntent(intent)
     }

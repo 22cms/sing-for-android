@@ -39,6 +39,9 @@ class AiStemSeparationEngine(
     @Volatile private var inProcessedFrames = 0L
 
     private val vocalRing = FloatArray(RING_SIZE * 2)
+    private val centerRing = FloatArray(RING_SIZE * 2)
+    @Volatile private var centerStartFrame = 0L
+    @Volatile private var centerEndFrame = 0L
     @Volatile private var vocalWriteFrames = 0L
     @Volatile private var vocalReadFrames = 0L
 
@@ -47,10 +50,20 @@ class AiStemSeparationEngine(
     private val chunkStftTensor = FloatArray(StftEngine.MAX_TENSOR_SIZE)
     private val chunkVocalTensor = FloatArray(StftEngine.MAX_TENSOR_SIZE)
     private val chunkVocalPcm = FloatArray(CHUNK_SAMPLES * 2)
+    private val chunkCenterPcm = FloatArray(CHUNK_SAMPLES * 2)
+    private val chunkRawVocalPcm = FloatArray(CHUNK_SAMPLES * 2)
 
     // Dedicated Time-domain worker buffers (Apple Sing Vi-NNet)
     private val timeDomainInPcm = FloatArray(4096 * 2)
     private val timeDomainOutPcm = FloatArray(4096 * 2)
+    private val timeDomainVocalPcm = FloatArray(4096 * 2)
+    private val previousVocalPcm = FloatArray(4096 * 2)
+    private val pendingVocalPcm = FloatArray(4096 * 2)
+    private val centerContextPcm = FloatArray((4096 + 2048) * 2)
+    private val centerContextOutPcm = FloatArray((4096 + 2048) * 2)
+    private var pendingStartFrame = Long.MIN_VALUE
+    private var pendingGeneration = -1L
+    private var hasPreviousVocal = false
 
     private val lock = ReentrantLock()
     private val workCond = lock.newCondition()
@@ -74,6 +87,13 @@ class AiStemSeparationEngine(
 
     // Feature toggles
     @Volatile var preserveSide: Boolean = false
+        set(value) {
+            if (field != value) {
+                centerStartFrame = 0L
+                centerEndFrame = 0L
+            }
+            field = value
+        }
     @Volatile var twoWaySlider: Boolean = false
     @Volatile var ecoMode: Boolean = true
         set(value) {
@@ -102,6 +122,8 @@ class AiStemSeparationEngine(
             inProcessedFrames = 0L
             vocalWriteFrames = 0L
             vocalReadFrames = 0L
+            centerStartFrame = 0L
+            centerEndFrame = 0L
             endOfStreamSignaled = false
             isBufferingInitialChunk = active
             newBackend.resetStates()
@@ -122,6 +144,8 @@ class AiStemSeparationEngine(
                 inProcessedFrames = 0L
                 vocalWriteFrames = 0L
                 vocalReadFrames = 0L
+                centerStartFrame = 0L
+                centerEndFrame = 0L
                 currentBackend.resetStates()
                 workCond.signalAll()
                 pacingCond.signalAll()
@@ -141,6 +165,8 @@ class AiStemSeparationEngine(
                 inProcessedFrames = 0L
                 vocalWriteFrames = 0L
                 vocalReadFrames = 0L
+                centerStartFrame = 0L
+                centerEndFrame = 0L
                 currentBackend.resetStates()
                 workCond.signalAll()
                 pacingCond.signalAll()
@@ -308,12 +334,12 @@ class AiStemSeparationEngine(
             val instL: Float
             val instR: Float
 
-            if (isPreserveSide) {
-                val midVocal = 0.5f * (rawVocalL + rawVocalR)
-                vocalL = midVocal
-                vocalR = midVocal
-                instL = inL - midVocal
-                instR = inR - midVocal
+            val hasCenter = isPreserveSide && rp >= centerStartFrame && rp < centerEndFrame
+            if (hasCenter) {
+                vocalL = centerRing[idx]
+                vocalR = centerRing[idx + 1]
+                instL = inL - vocalL
+                instR = inR - vocalR
             } else {
                 vocalL = rawVocalL
                 vocalR = rawVocalR
@@ -326,7 +352,7 @@ class AiStemSeparationEngine(
 
             if (!isTwoWay) {
                 // Standard Sing Mode:
-                if (isInst && !isPreserveSide) {
+                if (isInst && !hasCenter) {
                     // Direct instrumental volume mixing avoids phase artifacts
                     outL = instL + vocalLevel * (inL - instL)
                     outR = instR + vocalLevel * (inR - instR)
@@ -339,7 +365,7 @@ class AiStemSeparationEngine(
                 // Two-Way Slider Mode:
                 if (vocalLevel <= 0.5f) {
                     val alpha = vocalLevel / 0.5f
-                    if (isInst && !isPreserveSide) {
+                    if (isInst && !hasCenter) {
                         outL = instL + alpha * (inL - instL)
                         outR = instR + alpha * (inR - instR)
                     } else {
@@ -396,6 +422,8 @@ class AiStemSeparationEngine(
             inProcessedFrames = 0L
             vocalWriteFrames = 0L
             vocalReadFrames = 0L
+            centerStartFrame = 0L
+            centerEndFrame = 0L
             endOfStreamSignaled = false
             isBufferingInitialChunk = active
             currentBackend.resetStates()
@@ -479,6 +507,32 @@ class AiStemSeparationEngine(
                         Log.i(TAG, "Time-domain NN: $tmBlocks blocks, avg ${tmTotalMs / tmBlocks} ms, min $tmMinMs ms, max $tmMaxMs ms (budget 92.9 ms/block, ${currentBackend.providerName})")
                     }
 
+                    val makeCenter = preserveSide
+                    if (makeCenter) {
+                        for (i in 0 until blockSize) {
+                            val framePos = startFrame - lookaheadSize + i
+                            val idx = ((framePos * 2) and (RING_MASK * 2 + 1).toLong()).toInt()
+                            timeDomainVocalPcm[2 * i] = if (isInstrumental && framePos >= 0) inRing[idx] - timeDomainOutPcm[2 * i] else timeDomainOutPcm[2 * i]
+                            timeDomainVocalPcm[2 * i + 1] = if (isInstrumental && framePos >= 0) inRing[idx + 1] - timeDomainOutPcm[2 * i + 1] else timeDomainOutPcm[2 * i + 1]
+                        }
+                        if (pendingGeneration != myGen || pendingStartFrame + blockSize != startFrame - lookaheadSize) {
+                            pendingStartFrame = Long.MIN_VALUE
+                            hasPreviousVocal = false
+                        }
+                        if (pendingStartFrame != Long.MIN_VALUE) {
+                            // Analyze the pending block with real samples on either side.
+                            // Reflect only at the beginning of a stream, never at each block edge.
+                            for (i in 0 until 1024) {
+                                val src = if (hasPreviousVocal) blockSize - 1024 + i else 1024 - i
+                                centerContextPcm[2 * i] = if (hasPreviousVocal) previousVocalPcm[2 * src] else pendingVocalPcm[2 * src]
+                                centerContextPcm[2 * i + 1] = if (hasPreviousVocal) previousVocalPcm[2 * src + 1] else pendingVocalPcm[2 * src + 1]
+                            }
+                            System.arraycopy(pendingVocalPcm, 0, centerContextPcm, 2048, blockSize * 2)
+                            System.arraycopy(timeDomainVocalPcm, 0, centerContextPcm, (blockSize + 1024) * 2, 2048)
+                            stftEngine.centerCutPcm(centerContextPcm, centerContextOutPcm, blockSize + 2048)
+                        }
+                    }
+
                     var isStale = false
                     lock.withLock {
                         if (!running || !active || myGen != seekGeneration.get()) {
@@ -499,8 +553,32 @@ class AiStemSeparationEngine(
                                 }
                             }
 
+                            if (makeCenter && preserveSide && pendingStartFrame != Long.MIN_VALUE && pendingStartFrame + blockSize > 0) {
+                                val centerStart = maxOf(0L, pendingStartFrame)
+                                val centerEnd = minOf(inWriteFrames, pendingStartFrame + blockSize)
+                                for (frame in centerStart until centerEnd) {
+                                    val idx = ((frame * 2) and (RING_MASK * 2 + 1).toLong()).toInt()
+                                    val src = (frame - pendingStartFrame).toInt() + 1024
+                                    centerRing[idx] = centerContextOutPcm[2 * src]
+                                    centerRing[idx + 1] = centerContextOutPcm[2 * src + 1]
+                                }
+                                if (centerEndFrame != centerStart) centerStartFrame = centerStart
+                                centerEndFrame = centerEnd
+                            }
+
+                            if (makeCenter && preserveSide) {
+                                if (pendingStartFrame != Long.MIN_VALUE) {
+                                    System.arraycopy(pendingVocalPcm, 0, previousVocalPcm, 0, blockSize * 2)
+                                    hasPreviousVocal = true
+                                }
+                                System.arraycopy(timeDomainVocalPcm, 0, pendingVocalPcm, 0, blockSize * 2)
+                                pendingStartFrame = destFrame
+                                pendingGeneration = myGen
+                            }
+
                             if (targetEnd > 0) {
-                                vocalWriteFrames = maxOf(vocalWriteFrames, minOf(inWriteFrames, targetEnd))
+                                val readyEnd = if (makeCenter && preserveSide) centerEndFrame else targetEnd
+                                vocalWriteFrames = maxOf(vocalWriteFrames, minOf(inWriteFrames, readyEnd))
                             }
 
                             if (isFlushingDelay) {
@@ -584,7 +662,21 @@ class AiStemSeparationEngine(
                     currentBackend.run(chunkStftTensor, chunkVocalTensor)
                     val tInf = System.currentTimeMillis()
 
+                    val makeCenter = preserveSide
+                    if (makeCenter && !isInstrumental) {
+                        // The NN already produced a vocal spectrum: reuse its STFT
+                        // rather than transforming the vocal PCM a second time.
+                        System.arraycopy(chunkVocalTensor, 0, chunkStftTensor, 0, 4 * currentBins * StftEngine.N_FRAMES)
+                        stftEngine.centerCutTensor(chunkStftTensor, currentBins)
+                        stftEngine.inverse(chunkStftTensor, chunkCenterPcm, currentBins)
+                    }
                     stftEngine.inverse(chunkVocalTensor, chunkVocalPcm, currentBins)
+                    if (makeCenter && isInstrumental) {
+                        for (i in 0 until CHUNK_SAMPLES * 2) {
+                            chunkRawVocalPcm[i] = chunkInPcm[i] - chunkVocalPcm[i]
+                        }
+                        stftEngine.centerCutPcm(chunkRawVocalPcm, chunkCenterPcm, CHUNK_SAMPLES)
+                    }
                     val t1 = System.currentTimeMillis()
                     Log.i(TAG, "STFT chunk separated in ${t1 - t0} ms [stft=${tStft - t0}ms, nn=${tInf - tStft}ms, istft=${t1 - tInf}ms] (window: 5.92s, step: 4.92s, gen: $myGen, provider: ${currentBackend.providerName})")
 
@@ -594,6 +686,9 @@ class AiStemSeparationEngine(
                             isStale = true
                         } else {
                             writeVocalWithOverlapAdd(chunkVocalPcm, startFrame)
+                            if (makeCenter && preserveSide) {
+                                writeCenterWithOverlapAdd(chunkCenterPcm, startFrame)
+                            }
                             workCond.signalAll()
 
                             val curCushion = maxOf(0L, vocalWriteFrames - vocalReadFrames)
@@ -671,6 +766,23 @@ class AiStemSeparationEngine(
 
             vocalWriteFrames = actualEnd
         }
+    }
+
+    private fun writeCenterWithOverlapAdd(centerPcm: FloatArray, chunkStartFrame: Long) {
+        val targetEnd = chunkStartFrame + CHUNK_SAMPLES
+        val actualEnd = if (endOfStreamSignaled && inProcessedFrames >= inWriteFrames) {
+            minOf(inWriteFrames, targetEnd)
+        } else targetEnd
+        val hasOverlap = centerEndFrame > chunkStartFrame
+        val overlap = if (hasOverlap) minOf(CROSSFADE_SAMPLES.toLong(), centerEndFrame - chunkStartFrame).toInt() else 0
+        for (i in 0 until CHUNK_SAMPLES) {
+            val idx = (((chunkStartFrame + i) * 2) and (RING_MASK * 2 + 1).toLong()).toInt()
+            val ramp = if (i < overlap) i.toFloat() / CROSSFADE_SAMPLES else 1.0f
+            centerRing[idx] = (1.0f - ramp) * centerRing[idx] + ramp * centerPcm[2 * i]
+            centerRing[idx + 1] = (1.0f - ramp) * centerRing[idx + 1] + ramp * centerPcm[2 * i + 1]
+        }
+        if (!hasOverlap) centerStartFrame = chunkStartFrame
+        centerEndFrame = actualEnd
     }
 
     fun release() {

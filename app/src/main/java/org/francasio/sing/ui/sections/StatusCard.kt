@@ -13,12 +13,14 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Close
+import androidx.compose.material.icons.outlined.Warning
 import androidx.compose.material.icons.outlined.CheckCircle
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
@@ -33,6 +35,9 @@ import org.francasio.sing.util.ModelLoader
 @Composable
 fun StatusCard(
     isModuleLoaded: Boolean,
+    isModuleVersionMismatch: Boolean = false,
+    appVersion: String = "",
+    moduleVersion: String = "",
     xposedManagerInfo: String,
     selectedModelId: String,
     currentModel: ModelLoader.ModelInfo?,
@@ -59,7 +64,9 @@ fun StatusCard(
                             .size(40.dp)
                             .clip(CircleShape)
                             .background(
-                                if (isModuleLoaded) {
+                                if (isModuleVersionMismatch) {
+                                   if (isMaterialYou) DefaultYellowError else DefaultYellowError.copy(alpha = 0.2f)
+                                } else if (isModuleLoaded) {
                                     if (isMaterialYou) Primary else Primary.copy(alpha = 0.15f)
                                 } else {
                                     TextSecondary.copy(alpha = 0.15f)
@@ -68,9 +75,12 @@ fun StatusCard(
                         contentAlignment = Alignment.Center
                     ) {
                         Icon(
-                            imageVector = if (isModuleLoaded) Icons.Outlined.CheckCircle else Icons.Outlined.Close,
+                            imageVector = if (isModuleVersionMismatch) Icons.Outlined.Warning
+                            else if (isModuleLoaded) Icons.Outlined.CheckCircle else Icons.Outlined.Close,
                             contentDescription = null,
-                            tint = if (isModuleLoaded) {
+                            tint = if (isModuleVersionMismatch) {
+                                if (isMaterialYou) Accent2_900 else DefaultYellowError
+                            } else if (isModuleLoaded) {
                                 if (isMaterialYou) Accent2_900 else Primary
                             } else {
                                 TextSecondary
@@ -83,14 +93,19 @@ fun StatusCard(
 
                     Column(modifier = Modifier.weight(1f)) {
                         Text(
-                            text = stringResource(id = if (isModuleLoaded) R.string.status_loaded else R.string.status_not_loaded),
+                            text = stringResource(id = if (isModuleVersionMismatch) R.string.module_version_mismatch
+                            else if (isModuleLoaded) R.string.status_loaded else R.string.status_not_loaded),
                             color = TextPrimary,
                             fontSize = 17.sp,
                             fontWeight = FontWeight.Bold
                         )
                         if (isModuleLoaded) {
                             Text(
-                                text = xposedManagerInfo.ifEmpty { "Active Service" },
+                                text = if (isModuleVersionMismatch) {
+                                    stringResource(id = R.string.module_version_label, appVersion, moduleVersion)
+                                } else {
+                                    xposedManagerInfo.ifEmpty { "Active Service" }
+                                },
                                 color = TextSecondary,
                                 fontSize = 12.5.sp
                             )
@@ -98,7 +113,15 @@ fun StatusCard(
                     }
                 }
 
-                if (!isModuleLoaded) {
+                if (isModuleVersionMismatch) {
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Text(
+                        text = stringResource(id = R.string.tip_version_mismatch),
+                        color = TextSecondary,
+                        fontSize = 12.5.sp,
+                        lineHeight = 17.sp
+                    )
+                } else if (!isModuleLoaded) {
                     Spacer(modifier = Modifier.height(12.dp))
                     Text(
                         text = stringResource(id = R.string.tip_not_loaded),
@@ -132,4 +155,3 @@ fun StatusCard(
         }
     }
 }
-

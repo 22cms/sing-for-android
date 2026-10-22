@@ -1,6 +1,31 @@
 import com.android.build.api.variant.FilterConfiguration
 import java.io.FileInputStream
 import java.util.Properties
+import org.gradle.api.DefaultTask
+import org.gradle.api.provider.Property
+import org.gradle.api.file.DirectoryProperty
+import org.gradle.api.tasks.Input
+import org.gradle.api.tasks.OutputDirectory
+import org.gradle.api.tasks.TaskAction
+
+abstract class GenerateEngineVersion : DefaultTask() {
+    @get:Input abstract val versionName: Property<String>
+    @get:OutputDirectory abstract val outputDirectory: DirectoryProperty
+
+    @TaskAction
+    fun generate() {
+        val escaped = versionName.get().replace("\\", "\\\\").replace("\"", "\\\"")
+        val source = outputDirectory.file("org/francasio/sing/provider/EngineVersion.kt").get().asFile
+        source.parentFile.mkdirs()
+        source.writeText("""
+            package org.francasio.sing.provider
+
+            // Generated from app/build.gradle.kts versionName. Inlined into the
+            // injected engine so LSPatch reports its embedded build, not the installed app.
+            internal const val ENGINE_VERSION = "$escaped"
+        """.trimIndent() + "\n")
+    }
+}
 
 plugins {
     id("com.android.application")
@@ -18,8 +43,8 @@ android {
         // Android 11 (API 30) minimum SDK to match Apple Music's minimum SDK version
         minSdk = 30
         targetSdk = 34
-        versionCode = 1
-        versionName = "1.0"
+        versionCode = 2
+        versionName = "1.1"
 
         ndk {
             abiFilters.addAll(listOf("armeabi-v7a", "arm64-v8a", "x86_64"))
@@ -179,6 +204,14 @@ val abiCodes = mapOf(
 
 androidComponents {
     onVariants { variant ->
+        val generateEngineVersion = tasks.register<GenerateEngineVersion>(
+            "generate${variant.name.replaceFirstChar { it.uppercase() }}EngineVersion"
+        ) {
+            versionName.set(android.defaultConfig.versionName!!)
+            outputDirectory.set(layout.buildDirectory.dir("generated/engineVersion/${variant.name}"))
+        }
+        kotlin.sourceSets.getByName(variant.name).kotlin.srcDir(generateEngineVersion)
+
         variant.outputs.forEach { output ->
             val abi = output.filters.find {
                 it.filterType == FilterConfiguration.FilterType.ABI

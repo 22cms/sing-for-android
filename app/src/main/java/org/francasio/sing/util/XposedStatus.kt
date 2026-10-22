@@ -97,5 +97,27 @@ object XposedStatus {
 
         return "Xposed Framework"
     }
-}
 
+    fun getAppVersion(context: Context): String {
+        return try {
+            context.packageManager.getPackageInfo("org.francasio.sing", 0).versionName ?: "?"
+        } catch (_: Throwable) {
+            try { context.packageManager.getPackageInfo(context.packageName, 0).versionName ?: "?" } catch (_: Throwable) { "?" }
+        }
+    }
+
+    fun getModuleVersion(context: Context): String {
+        return SingSettings.moduleVersion?.let { "v$it" }
+            ?: context.getString(org.francasio.sing.R.string.module_version_unknown)
+    }
+
+    fun isModuleVersionMismatch(context: Context): Boolean {
+        // Only warn when the module is actually running in the host process.
+        if (!SingSettings.isHeartbeatActive(context)) return false
+        // An older module that predates version reporting does not send
+        // "engine_version" at all -> treat as mismatch.
+        val mod = SingSettings.moduleVersion ?: return true
+        val app = getAppVersion(context)
+        return mod != app
+    }
+}

@@ -48,6 +48,31 @@ Java_org_francasio_sing_audio_StftEngine_nativeInverse(
     env->ReleaseFloatArrayElements(out_stereo_pcm, pcm_ptr, 0);
 }
 
+JNIEXPORT void JNICALL
+Java_org_francasio_sing_audio_StftEngine_nativeCenterCutTensor(
+        JNIEnv* env, jobject /*thiz*/, jlong handle, jfloatArray tensor, jint num_bins) {
+    auto* engine = reinterpret_cast<sing::StftEngine*>(handle);
+    if (!engine || num_bins <= 0 || num_bins > sing::MAX_N_BINS ||
+        env->GetArrayLength(tensor) < 4 * num_bins * sing::N_FRAMES) return;
+    jfloat* data = env->GetFloatArrayElements(tensor, nullptr);
+    engine->centerCutTensor(data, num_bins);
+    env->ReleaseFloatArrayElements(tensor, data, 0);
+}
+
+JNIEXPORT void JNICALL
+Java_org_francasio_sing_audio_StftEngine_nativeCenterCutPcm(
+        JNIEnv* env, jobject /*thiz*/, jlong handle, jfloatArray pcm,
+        jfloatArray out, jint frames) {
+    auto* engine = reinterpret_cast<sing::StftEngine*>(handle);
+    if (!engine || frames <= 1 || env->GetArrayLength(pcm) < frames * 2 ||
+        env->GetArrayLength(out) < frames * 2) return;
+    jfloat* input = env->GetFloatArrayElements(pcm, nullptr);
+    jfloat* output = env->GetFloatArrayElements(out, nullptr);
+    engine->centerCutPcm(input, output, frames);
+    env->ReleaseFloatArrayElements(pcm, input, JNI_ABORT);
+    env->ReleaseFloatArrayElements(out, output, 0);
+}
+
 JNIEXPORT jlong JNICALL
 Java_org_francasio_sing_audio_StftEngine_nativeResamplerCreate(
         JNIEnv* /*env*/, jclass /*clazz*/, jint fromRate, jint toRate) {

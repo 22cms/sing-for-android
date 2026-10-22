@@ -10,7 +10,7 @@ class SettingsRequestReceiver : BroadcastReceiver() {
         if (intent.action == SingSettings.ACTION_REQUEST_SETTINGS) {
             val ts = intent.getLongExtra("timestamp", System.currentTimeMillis())
             val manager = intent.getStringExtra("manager_info") ?: "LSPatch"
-            SingSettings.saveHeartbeat(context, ts, manager)
+            SingSettings.saveHeartbeat(context, ts, manager, engineVersion = intent.getStringExtra("engine_version"))
 
             SingSettings.loadLocal(context)
             // Make sure the catalog is in memory before resolving the model:

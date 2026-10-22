@@ -53,6 +53,9 @@ data class BenchmarkResult(
 @Composable
 fun MainScreen(
     isModuleLoaded: Boolean = false,
+    isModuleVersionMismatch: Boolean = false,
+    appVersion: String = "",
+    moduleVersion: String = "",
     xposedManagerInfo: String = "",
     preserveSide: Boolean,
     twoWaySlider: Boolean,
@@ -119,6 +122,9 @@ fun MainScreen(
             // 1. Status Card
             StatusCard(
                 isModuleLoaded = isModuleLoaded,
+                isModuleVersionMismatch = isModuleVersionMismatch,
+                appVersion = appVersion,
+                moduleVersion = moduleVersion,
                 xposedManagerInfo = xposedManagerInfo,
                 selectedModelId = selectedModelId,
                 currentModel = currentModel,
@@ -198,7 +204,6 @@ fun MainScreenPreview() {
     AppleMusicSingTheme {
         MainScreen(
             isModuleLoaded = true,
-            xposedManagerInfo = "LSPosed v1.9.2",
             preserveSide = false,
             twoWaySlider = true,
             allowZeroFloor = true,

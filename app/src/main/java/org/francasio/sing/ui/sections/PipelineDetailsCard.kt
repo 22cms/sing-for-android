@@ -213,7 +213,7 @@ fun PipelineDetailsCard(
                 PipelineSpecRow(
                     label = stringResource(id = R.string.label_compute_precision),
                     value = if (precisionConverted) "FP32→FP16" else (currentModel?.precision?.uppercase() ?: "FP16"),
-                    valueColor = if (precisionConverted) Color(0xFFFFB74D) else TextPrimary
+                    valueColor = if (precisionConverted) DefaultYellowError else TextPrimary
                 )
 
                 val isHardwareFallback = remember(hardwareTarget, activeProvider) {
@@ -257,7 +257,7 @@ fun PipelineDetailsCard(
                 PipelineSpecRow(
                     label = stringResource(id = R.string.label_target_hardware),
                     value = actualHardwareDisplay,
-                    valueColor = if (isHardwareFallback) Color(0xFFFFB74D) else TextPrimary
+                    valueColor = if (isHardwareFallback) DefaultYellowError else TextPrimary
                 )
                 PipelineSpecRow(
                     label = stringResource(id = R.string.label_audio_pipeline),
