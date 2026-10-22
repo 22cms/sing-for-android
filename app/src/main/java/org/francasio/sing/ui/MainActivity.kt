@@ -18,6 +18,10 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.Text
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -45,6 +49,8 @@ import org.francasio.sing.audio.backend.InferenceBackend
 import org.francasio.sing.audio.backend.OnnxBackendFactory
 import org.francasio.sing.audio.backend.OnnxInferenceBackend
 import org.francasio.sing.util.ModelLoader
+import org.francasio.sing.R
+import org.francasio.sing.util.NativeLibDownloader
 import java.util.concurrent.Executors
 import kotlin.math.sin
 
@@ -73,6 +79,10 @@ class MainActivity : ComponentActivity() {
     private val threadCountState = mutableIntStateOf(4)
     private val materialYouState = mutableStateOf(true)
     private val benchmarkState = mutableStateOf(BenchmarkUiState())
+    private val showRuntimeDownloadDialogState = mutableStateOf(false)
+    private val runtimeDownloadLabelState = mutableStateOf("")
+    private val runtimeDownloadProgressState = mutableFloatStateOf(0f)
+    private var runtimeDownloadStarted = false
 
     private fun syncUiStatesWithSettings() {
         selectedModelIdState.value = SingSettings.selectedModelId
@@ -294,6 +304,20 @@ class MainActivity : ComponentActivity() {
                             alpha = a
                         }
                     )
+
+                    if (showRuntimeDownloadDialogState.value) {
+                        AlertDialog(
+                            onDismissRequest = {},
+                            title = { Text(text = runtimeDownloadLabelState.value) },
+                            text = {
+                                LinearProgressIndicator(
+                                    progress = { runtimeDownloadProgressState.value },
+                                    modifier = Modifier.fillMaxWidth()
+                                )
+                            },
+                            confirmButton = {}
+                        )
+                    }
 
                     AnimatedVisibility(
                         visible = (currentScreen == AppScreen.MODEL_SELECTION),
@@ -529,6 +553,24 @@ class MainActivity : ComponentActivity() {
         super.onResume()
         SingSettings.loadLocal(this)
         syncUiStatesWithSettings()
+        // On upgrade, an ONNX model may already be selected while its runtime
+        // libs are missing: fetch them up front with a visible dialog.
+        val sel = selectedModelIdState.value
+        if (!runtimeDownloadStarted && sel.contains("onnx", ignoreCase = true) &&
+            !NativeLibDownloader.isOnnxRuntimeInstalled(this)) {
+            runtimeDownloadStarted = true
+            showRuntimeDownloadDialogState.value = true
+            runtimeDownloadLabelState.value = getString(R.string.downloading_onnx_runtime)
+            bgExecutor.execute {
+                NativeLibDownloader.ensureOnnxRuntime(this@MainActivity) { label, p ->
+                    runOnUiThread {
+                        runtimeDownloadLabelState.value = label
+                        runtimeDownloadProgressState.value = p
+                    }
+                }
+                runOnUiThread { showRuntimeDownloadDialogState.value = false }
+            }
+        }
         isModuleLoadedState.value = XposedStatus.isModuleActive(this)
         xposedManagerInfoState.value = XposedStatus.getEffectiveManagerInfo(this)
         checkRunBenchmarkIntent(intent)
