@@ -114,6 +114,26 @@ object ModelDownloader {
         Log.i(TAG, "Starting download for ${model.id}, candidate URLs: $candidateUrls")
 
         executor.execute {
+            // If this is an ONNX model, make sure the ONNX Runtime (and, on
+            // supported Snapdragon SoCs, the QNN accelerator) native libraries
+            // are present first. They are downloaded on demand from Maven Central.
+            if (model.engine.equals(SingSettings.ENGINE_ONNX, ignoreCase = true)) {
+                mainHandler.post {
+                    downloadStates[model.id] = DownloadState.Downloading(0f, 0L, 0L)
+                }
+                val ok = NativeLibDownloader.ensureOnnxRuntime(appContext) { label, p ->
+                    mainHandler.post {
+                        downloadStates[model.id] = DownloadState.Downloading((p * 0.3f).coerceIn(0f, 0.3f), 0L, 0L)
+                    }
+                }
+                if (!ok) {
+                    mainHandler.post {
+                        downloadStates[model.id] = DownloadState.Error("Failed to download ONNX/QNN runtime libraries")
+                    }
+                    return@execute
+                }
+            }
+
             val modelsDir = getModelsDir(appContext)
             val finalFile = File(modelsDir, model.fileName)
             val tmpFile = File(modelsDir, "${model.fileName}.tmp")
@@ -189,7 +209,12 @@ object ModelDownloader {
                             val now = System.currentTimeMillis()
                             if (now - lastProgressUpdate > 100 || downloadedBytes == totalBytes) {
                                 lastProgressUpdate = now
-                                val progress = if (totalBytes > 0) downloadedBytes.toFloat() / totalBytes else 0f
+                                val baseProgress = if (totalBytes > 0) downloadedBytes.toFloat() / totalBytes else 0f
+                                val progress = if (model.engine.equals(SingSettings.ENGINE_ONNX, ignoreCase = true)) {
+                                    0.3f + baseProgress * 0.7f
+                                } else {
+                                    baseProgress
+                                }
                                 mainHandler.post {
                                     downloadStates[model.id] = DownloadState.Downloading(progress, downloadedBytes, totalBytes)
                                 }

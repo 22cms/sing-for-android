@@ -71,6 +71,7 @@ object XposedStatus {
     fun isModuleActive(context: Context): Boolean {
         if (isBound()) return true
         if (isModuleLoaded()) return true
+        if (SingSettings.moduleReachable) return true
         return SingSettings.isHeartbeatActive(context)
     }
 

@@ -69,6 +69,7 @@ import org.francasio.sing.ui.theme.*
 import org.francasio.sing.util.DeviceHelper
 import org.francasio.sing.util.ModelDownloader
 import org.francasio.sing.util.ModelLoader
+import org.francasio.sing.util.NativeLibDownloader
 
 @Composable
 fun ModelSelectionScreen(
@@ -103,18 +104,9 @@ fun ModelSelectionScreen(
     val highlightPulse = remember { Animatable(0f) }
 
     val visibleModelDefinitions = remember(modelDefinitions.toList()) {
-        if (ModelLoader.isOnnxRuntimeAvailable) {
-            modelDefinitions.toList()
-        } else {
-            modelDefinitions.mapNotNull { modelDef ->
-                val nonOnnxVersions = modelDef.versions.filter { !it.engine.equals(SingSettings.ENGINE_ONNX, ignoreCase = true) }
-                if (nonOnnxVersions.isNotEmpty()) {
-                    modelDef.copy(versions = nonOnnxVersions)
-                } else {
-                    null
-                }
-            }
-        }
+        // ONNX models stay visible even when their native libs are not downloaded
+        // yet: selecting one triggers the on-demand download flow.
+        modelDefinitions.toList()
     }
 
     LaunchedEffect(scrollToSelected, visibleModelDefinitions.size) {
@@ -538,8 +530,11 @@ private fun ModelVersionRow(
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
+                        val downloadingLabel = if (modelInfo.engine.equals(SingSettings.ENGINE_ONNX, ignoreCase = true) &&
+                            NativeLibDownloader.currentLabel.isNotEmpty()
+                        ) NativeLibDownloader.currentLabel else stringResource(id = R.string.downloading)
                         Text(
-                            text = "Downloading...",
+                            text = downloadingLabel,
                             color = Primary,
                             fontSize = 11.sp,
                             fontWeight = FontWeight.Medium,

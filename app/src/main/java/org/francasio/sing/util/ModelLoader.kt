@@ -34,8 +34,8 @@ object ModelLoader {
      */
     val isOnnxRuntimeAvailable: Boolean by lazy {
         try {
-            Class.forName("ai.onnxruntime.OrtEnvironment")
-            true
+            (ModelLoader::class.java.classLoader ?: Thread.currentThread().contextClassLoader)
+                ?.loadClass("ai.onnxruntime.OrtEnvironment") != null
         } catch (_: Throwable) {
             false
         }
@@ -207,10 +207,9 @@ object ModelLoader {
             val str = file.readText()
             val obj = JSONObject(str)
             val engine = obj.optString("engine", SingSettings.ENGINE_ONNX)
-            if (!isOnnxRuntimeAvailable && engine.equals(SingSettings.ENGINE_ONNX, ignoreCase = true)) {
-                Log.w(TAG, "Selected model ${obj.optString("id")} uses ONNX, but ONNXRuntime is not available in this build")
-                return null
-            }
+            // Keep the cached selection even if ONNX native libs are not downloaded
+            // yet; they will be fetched on demand when the backend is created.
+
             val precision = obj.optString("precision", "FP16")
             val isRecommended = obj.optBoolean("isRecommended", isVersionRecommended(engine, precision))
             val info = ModelInfo(
@@ -322,8 +321,8 @@ object ModelLoader {
                     // here so stale catalogs also stop surfacing it in the picker.
                     if (engine.equals(SingSettings.ENGINE_LITERT, ignoreCase = true)) continue
 
-                    // Drop ONNX models/versions if this build does not bundle ONNX Runtime
-                    if (!isOnnxRuntimeAvailable && engine.equals(SingSettings.ENGINE_ONNX, ignoreCase = true)) continue
+                    // ONNX models stay visible even when their native libs are not
+                    // downloaded yet: selecting one triggers the on-demand download.
 
                     val precision = vObj.optString("precision", "FP16")
                     val fileName = vObj.getString("fileName")
@@ -667,10 +666,6 @@ object ModelLoader {
                 activeProviderName = mnn.providerName
                 mnn
             } else {
-                if (!isOnnxRuntimeAvailable) {
-                    Log.e(TAG, "Cannot initialize ONNX inference backend for ${modelInfo.id}: ONNXRuntime is not included in this build")
-                    return null
-                }
                 Log.i(TAG, "Initializing ONNX inference backend for ${modelInfo.id} (${modelFile.name}, target=$hardwareTarget)...")
                 val onnx = OnnxBackendFactory.createBackend(
                     context,
@@ -704,10 +699,9 @@ object ModelLoader {
     }
 
     fun registerDynamicModel(info: ModelInfo) {
-        if (!isOnnxRuntimeAvailable && info.isOnnx) {
-            Log.d(TAG, "Skipping registration of dynamic ONNX model ${info.id}: ONNXRuntime not available")
-            return
-        }
+        // Register ONNX models even before their native libs are downloaded;
+        // the backend creation path will fetch them on demand.
+
         dynamicModels[info.id] = info
         synchronized(catalogLock) {
             val list = AVAILABLE_MODELS.toMutableList()

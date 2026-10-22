@@ -54,7 +54,13 @@
     <string name="btn_run_benchmark">Run Speed Benchmark</string>
     <string name="btn_benchmarking">Benchmarking…</string>
     <string name="label_processing_speed">Processing Speed</string>
+    <string name="downloading_onnx_runtime">Downloading ONNX Runtime…</string>
+    <string name="extracting_onnx_runtime">Extracting ONNX Runtime…</string>
+    <string name="downloading_qnn_accelerator">Downloading QNN Accelerator…</string>
+    <string name="extracting_qnn_accelerator">Extracting QNN Accelerator…</string>
+    <string name="downloading">Downloading…</string>
     <string name="benchmark_rtf_format">%1$.2fx Real-Time</string>
+    <string name="benchmark_failed">Benchmark failed</string>
     <string name="benchmark_details_format" translatable="false">Chunk Processing: %1$d ms (Audio Window: 5,921 ms) • STFT (KissFFT 6144): %2$d ms • NN Inference (%3$s): %4$d ms • iSTFT Synthesis: %5$d ms</string>
     <string name="verdict_fast_enough">Device is fast enough for real-time stem separation.</string>
     <string name="verdict_too_slow">Inference is slower than real-time audio playback. Audio underruns may occur.</string>

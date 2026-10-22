@@ -10,7 +10,9 @@ import java.io.FileOutputStream
 import java.util.zip.ZipFile
 import org.francasio.sing.audio.StftEngine
 import org.francasio.sing.provider.SingSettings
+import org.francasio.sing.util.DeviceHelper
 import org.francasio.sing.util.ModelLoader
+import org.francasio.sing.util.NativeLibDownloader
 import org.francasio.sing.util.NativeEnv
 
 object OnnxBackendFactory {
@@ -42,6 +44,35 @@ object OnnxBackendFactory {
     ): InferenceBackend {
         ensureOnnxNativeLibrariesLoaded(context, moduleApkPath)
 
+        // Make the extracted cache dir visible to the classloader's native library
+        // search path so ONNX Runtime's static initializer (which calls
+        // System.loadLibrary) can resolve the cached .so files.
+        val cacheDir = File(context.cacheDir, "ort_libs_${if ((android.os.Build.SUPPORTED_ABIS.firstOrNull() ?: "arm64-v8a").startsWith("arm64")) "arm64-v8a" else (android.os.Build.SUPPORTED_ABIS.firstOrNull() ?: "arm64-v8a")}")
+        addNativeLibraryPath(context, cacheDir)
+        try {
+            val existing = System.getenv("LD_LIBRARY_PATH") ?: ""
+            NativeEnv.setenv("LD_LIBRARY_PATH", cacheDir.absolutePath + (if (existing.isNotEmpty()) ":$existing" else ""))
+        } catch (_: Throwable) {}
+
+        // Bypass OnnxRuntime's Android static initializer (which calls
+        // System.loadLibrary and cannot see our cache dir) by pre-loading the
+        // native libs and initialising the API handle via reflection.
+        try {
+            val moduleCl = org.francasio.sing.util.ModelLoader::class.java.classLoader
+            val cls = Class.forName("ai.onnxruntime.OnnxRuntime", false, moduleCl)
+            val initMethod = cls.getDeclaredMethod("initialiseAPIBase", Int::class.javaPrimitiveType)
+            initMethod.isAccessible = true
+            val handle = initMethod.invoke(null, 23) as Long
+            val handleField = cls.getDeclaredField("ortApiHandle")
+            handleField.isAccessible = true
+            handleField.setLong(null, handle)
+            val loadedField = cls.getDeclaredField("loaded")
+            loadedField.isAccessible = true
+            loadedField.setBoolean(null, true)
+            Log.i(TAG, "Pre-initialized OnnxRuntime API handle: $handle")
+        } catch (t: Throwable) {
+            Log.w(TAG, "Reflection init failed: ${t.message}")
+        }
         val env = ortEnv ?: OrtEnvironment.getEnvironment().also { ortEnv = it }
         val session = createSessionWithBestProvider(
             context, env, modelFile.absolutePath, threads, target, modelInfo, moduleApkPath
@@ -94,6 +125,20 @@ object OnnxBackendFactory {
 
             val targetDir = File(context.cacheDir, "ort_libs_$primaryAbi")
             targetDir.mkdirs()
+
+            // If the native libs are not already present (e.g. downloadable build),
+            // fetch them from Maven Central before attempting APK extraction.
+            if (!NativeLibDownloader.isOnnxRuntimeInstalled(context)) {
+                Log.i(TAG, "ONNX Runtime native libs missing - attempting download")
+                NativeLibDownloader.downloadOnnxRuntime(context) { _, _ -> }
+            }
+            if (DeviceHelper.isQualcommWithHexagonHtp && !NativeLibDownloader.isQnnRuntimeInstalled(context)) {
+                val skel = NativeLibDownloader.requiredSkeleton(context)
+                if (skel != null) {
+                    Log.i(TAG, "QNN runtime native libs missing - attempting download")
+                    NativeLibDownloader.downloadQnnRuntime(context) { _, _ -> }
+                }
+            }
 
             val htpLib = File(targetDir, "libQnnHtp.so")
             val ortLib = File(targetDir, "libonnxruntime.so")
@@ -543,5 +588,35 @@ object OnnxBackendFactory {
         activeProviderShort = "ONNX Runtime CPU, $threads threads"
         activeProviderName = "${modelInfo.precision} via ONNX Runtime CPU ($threads threads)"
         return session
+    }
+
+    private fun addNativeLibraryPath(context: Context, dir: File) {
+        if (!dir.exists()) return
+        try {
+            val cl = context.classLoader
+            val pathListField = cl.javaClass.superclass?.getDeclaredField("pathList")
+                ?: cl.javaClass.getDeclaredField("pathList")
+            pathListField.isAccessible = true
+            val pathList = pathListField.get(cl)
+            // Newer Android: nativeLibraryDirectories (List<File>)
+            try {
+                val field = pathList.javaClass.getDeclaredField("nativeLibraryDirectories")
+                field.isAccessible = true
+                val dirs = field.get(pathList) as? MutableList<File>
+                if (dirs != null && dir !in dirs) dirs.add(dir)
+                Log.i(TAG, "nativeLibraryDirectories now: $dirs")
+            } catch (t: Throwable) { Log.w(TAG, "nativeLibraryDirectories update failed: ${t.message}") }
+            // Older: nativeLibraryPath (String)
+            try {
+                val field = pathList.javaClass.getDeclaredField("nativeLibraryPath")
+                field.isAccessible = true
+                val old = field.get(pathList) as? String
+                if (old != null && !old.contains(dir.absolutePath)) {
+                    field.set(pathList, old + java.io.File.pathSeparator + dir.absolutePath)
+                }
+            } catch (_: Throwable) {}
+        } catch (t: Throwable) {
+            Log.w(TAG, "Could not add native library path: ${t.message}")
+        }
     }
 }

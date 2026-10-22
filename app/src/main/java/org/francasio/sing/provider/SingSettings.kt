@@ -145,6 +145,9 @@ object SingSettings {
     @Volatile
     var activeProvider: String = ""
 
+    @Volatile
+    var moduleReachable: Boolean = false
+
     fun saveHeartbeat(
         context: Context,
         timestamp: Long,
@@ -324,6 +327,12 @@ object SingSettings {
                 allowZeroFloor = bundle.getBoolean(KEY_ALLOW_ZERO_FLOOR, allowZeroFloor)
                 forceSongEligibility = bundle.getBoolean(KEY_FORCE_SONG_ELIGIBILITY, forceSongEligibility)
 
+                val apkPath = bundle.getString("module_apk_path")
+                if (!apkPath.isNullOrBlank() && java.io.File(apkPath).exists()) {
+                    resolvedModulePath = apkPath
+                    Log.i(TAG, "Updated resolvedModulePath from provider: $apkPath")
+                }
+
                 try {
                     val prefs = context.getSharedPreferences(PREFS_CACHE, Context.MODE_PRIVATE)
                     prefs.edit()
@@ -340,6 +349,7 @@ object SingSettings {
                 } catch (_: Throwable) {}
 
                 Log.i(TAG, "Synced settings from provider: preserveSide=$preserveSide, twoWaySlider=$twoWaySlider, threads=$threadCount, ecoMode=$ecoMode, target=$hardwareTarget (forceCpu=$forceCpu), model=$selectedModelId, allowZeroFloor=$allowZeroFloor, forceSongEligibility=$forceSongEligibility")
+                moduleReachable = true
                 settingsSyncRetryCount = 0
                 return true
             }

@@ -43,6 +43,12 @@
     <string name="btn_benchmarking">Benchmark in corso...</string>
     <string name="label_processing_speed">Velocità di Elaborazione</string>
     <string name="benchmark_rtf_format">%1$.2fx Tempo Reale</string>
+    <string name="benchmark_failed">Benchmark fallito</string>
+    <string name="downloading_onnx_runtime">Download ONNX Runtime in corso…</string>
+    <string name="extracting_onnx_runtime">Estrazione ONNX Runtime in corso…</string>
+    <string name="downloading_qnn_accelerator">Download acceleratore QNN in corso…</string>
+    <string name="extracting_qnn_accelerator">Estrazione acceleratore QNN in corso…</string>
+    <string name="downloading">Download in corso…</string>
 
     <string name="verdict_fast_enough">Il dispositivo è abbastanza veloce per eseguire la separazione vocale in tempo reale.</string>
     <string name="verdict_too_slow">Il tempo d\'inferenza è più lento della riproduzione in tempo reale. Potrebbero verificarsi degli underrun sull\'audio.</string>

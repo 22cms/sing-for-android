@@ -159,7 +159,7 @@ fun PipelineDetailsCard(
                                 .padding(horizontal = 12.dp, vertical = 5.dp)
                         ) {
                             Text(
-                                text = stringResource(id = R.string.benchmark_rtf_format, result.rtf),
+                                text = if (result.rtf <= 0.0) stringResource(id = R.string.benchmark_failed) else stringResource(id = R.string.benchmark_rtf_format, result.rtf),
                                 color = badgeTextColor,
                                 fontSize = 14.sp,
                                 fontWeight = if (isFast) FontWeight.Bold else FontWeight.Medium
@@ -175,7 +175,9 @@ fun PipelineDetailsCard(
                         TextSecondary
                     }
                     Text(
-                        text = if (result.rtf >= 1.2) {
+                        text = if (result.rtf <= 0.0) {
+                            stringResource(id = R.string.benchmark_failed)
+                        } else if (result.rtf >= 1.2) {
                             stringResource(id = R.string.verdict_fast_enough)
                         } else {
                             stringResource(id = R.string.verdict_too_slow)

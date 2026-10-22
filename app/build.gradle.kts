@@ -134,6 +134,21 @@ android {
             useLegacyPackaging = false
             excludes += "**/libQnnGpu.so"
             excludes += "**/libQnnDsp*.so"
+            // ONNX Runtime + QNN accelerator are downloaded on demand (see
+            // NativeLibDownloader) instead of being shipped in the APK.
+            excludes += "**/libonnxruntime*.so"
+            excludes += "**/libQnn*.so"
+            excludes += "**/libc++.so"
+            excludes += "**/libcdsprpc.so"
+            excludes += "**/libvmmem.so"
+            excludes += "**/vendor.qti.hardware.dsp@1.0.so"
+            excludes += "**/libbase.so"
+            excludes += "**/libdmabufheap.so"
+            excludes += "**/libcutils.so"
+            excludes += "**/libvndksupport.so"
+            excludes += "**/libutils.so"
+            excludes += "**/libhardware.so"
+            excludes += "**/libhidlbase.so"
             // Vendor DSP libs shipped for the QNN HTP transport: keep them
             // byte-identical (do not strip) - they are prebuilt vendor blobs.
             keepDebugSymbols.addAll(listOf(

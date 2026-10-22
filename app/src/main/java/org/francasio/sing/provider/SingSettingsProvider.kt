@@ -34,6 +34,10 @@ class SingSettingsProvider : ContentProvider() {
                     putString(SingSettings.KEY_SELECTED_MODEL, SingSettings.selectedModelId)
                     putBoolean(SingSettings.KEY_ALLOW_ZERO_FLOOR, SingSettings.allowZeroFloor)
                     putBoolean(SingSettings.KEY_FORCE_SONG_ELIGIBILITY, SingSettings.forceSongEligibility)
+                    // Expose the module APK path over the provider so the host
+                    // process can resolve native libs without relying on the
+                    // (fragile) broadcast reply.
+                    putString("module_apk_path", ctx.applicationInfo.sourceDir)
                 }
             }
             SingSettings.METHOD_HEARTBEAT -> {
