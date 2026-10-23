@@ -73,6 +73,8 @@ class MainActivity : ComponentActivity() {
     private val twoWaySliderState = mutableStateOf(false)
     private val allowZeroFloorState = mutableStateOf(false)
     private val forceSongEligibilityState = mutableStateOf(false)
+    private val blurUnfocusedLyricsState = mutableStateOf(true)
+    private val centerGroupLyricsState = mutableStateOf(true)
     private val ecoModeState = mutableStateOf(true)
     private val hardwareTargetState = mutableStateOf(SingSettings.TARGET_NPU)
     private val threadCountState = mutableIntStateOf(4)
@@ -93,6 +95,8 @@ class MainActivity : ComponentActivity() {
         twoWaySliderState.value = SingSettings.twoWaySlider
         allowZeroFloorState.value = SingSettings.allowZeroFloor
         forceSongEligibilityState.value = SingSettings.forceSongEligibility
+        blurUnfocusedLyricsState.value = SingSettings.blurUnfocusedLyrics
+        centerGroupLyricsState.value = SingSettings.centerGroupLyrics
         ecoModeState.value = SingSettings.ecoMode
         hardwareTargetState.value = SingSettings.hardwareTarget
         threadCountState.intValue = SingSettings.threadCount.coerceIn(1, 12)
@@ -139,6 +143,8 @@ class MainActivity : ComponentActivity() {
             val twoWaySlider by twoWaySliderState
             val allowZeroFloor by allowZeroFloorState
             val forceSongEligibility by forceSongEligibilityState
+            val blurUnfocusedLyrics by blurUnfocusedLyricsState
+            val centerGroupLyrics by centerGroupLyricsState
             val ecoMode by ecoModeState
             val hardwareTarget by hardwareTargetState
             val threadCount by threadCountState
@@ -227,6 +233,8 @@ class MainActivity : ComponentActivity() {
                         twoWaySlider = twoWaySlider,
                         allowZeroFloor = allowZeroFloor,
                         forceSongEligibility = forceSongEligibility,
+                        blurUnfocusedLyrics = blurUnfocusedLyrics,
+                        centerGroupLyrics = centerGroupLyrics,
                         ecoMode = ecoMode,
                         hardwareTarget = hardwareTarget,
                         selectedModelId = selectedModelId,
@@ -252,6 +260,16 @@ class MainActivity : ComponentActivity() {
                         onForceSongEligibilityChange = { isChecked ->
                             forceSongEligibilityState.value = isChecked
                             SingSettings.saveLocal(this@MainActivity, SingSettings.KEY_FORCE_SONG_ELIGIBILITY, isChecked)
+                            SingSettings.broadcastSettings(this@MainActivity)
+                        },
+                        onBlurUnfocusedLyricsChange = { isChecked ->
+                            blurUnfocusedLyricsState.value = isChecked
+                            SingSettings.saveLocal(this@MainActivity, SingSettings.KEY_BLUR_UNFOCUSED_LYRICS, isChecked)
+                            SingSettings.broadcastSettings(this@MainActivity)
+                        },
+                        onCenterGroupLyricsChange = { isChecked ->
+                            centerGroupLyricsState.value = isChecked
+                            SingSettings.saveLocal(this@MainActivity, SingSettings.KEY_CENTER_GROUP_LYRICS, isChecked)
                             SingSettings.broadcastSettings(this@MainActivity)
                         },
                         onEcoModeChange = { isChecked ->

@@ -28,6 +28,7 @@ import org.francasio.sing.ui.sections.MainTopBar
 import org.francasio.sing.ui.sections.PerformanceSettingsCard
 import org.francasio.sing.ui.sections.PipelineDetailsCard
 import org.francasio.sing.ui.sections.QuickActionsRow
+import org.francasio.sing.ui.sections.LyricsSettingsCard
 import org.francasio.sing.ui.sections.SingSettingsCard
 import org.francasio.sing.ui.sections.StatusCard
 import org.francasio.sing.ui.theme.AppleMusicSingTheme
@@ -61,6 +62,8 @@ fun MainScreen(
     twoWaySlider: Boolean,
     allowZeroFloor: Boolean,
     forceSongEligibility: Boolean,
+    blurUnfocusedLyrics: Boolean,
+    centerGroupLyrics: Boolean,
     ecoMode: Boolean,
     hardwareTarget: String,
     selectedModelId: String,
@@ -70,6 +73,8 @@ fun MainScreen(
     onTwoWaySliderChange: (Boolean) -> Unit,
     onAllowZeroFloorChange: (Boolean) -> Unit,
     onForceSongEligibilityChange: (Boolean) -> Unit,
+    onBlurUnfocusedLyricsChange: (Boolean) -> Unit,
+    onCenterGroupLyricsChange: (Boolean) -> Unit,
     onEcoModeChange: (Boolean) -> Unit,
     onHardwareTargetChange: (String) -> Unit,
     onThreadCountChange: (Int) -> Unit,
@@ -158,6 +163,16 @@ fun MainScreen(
 
             Spacer(modifier = Modifier.height(16.dp))
 
+            // 3b. Lyrics Section
+            LyricsSettingsCard(
+                blurUnfocusedLyrics = blurUnfocusedLyrics,
+                centerGroupLyrics = centerGroupLyrics,
+                onBlurUnfocusedLyricsChange = onBlurUnfocusedLyricsChange,
+                onCenterGroupLyricsChange = onCenterGroupLyricsChange
+            )
+
+            Spacer(modifier = Modifier.height(16.dp))
+
             // 4. Performance & Hardware Section
             PerformanceSettingsCard(
                 ecoMode = ecoMode,
@@ -208,6 +223,8 @@ fun MainScreenPreview() {
             twoWaySlider = true,
             allowZeroFloor = true,
             forceSongEligibility = true,
+            blurUnfocusedLyrics = true,
+            centerGroupLyrics = true,
             ecoMode = true,
             hardwareTarget = SingSettings.TARGET_NPU,
             selectedModelId = "uvr_mdxnet_fp16",
@@ -228,6 +245,8 @@ fun MainScreenPreview() {
             onTwoWaySliderChange = {},
             onAllowZeroFloorChange = {},
             onForceSongEligibilityChange = {},
+            onBlurUnfocusedLyricsChange = {},
+            onCenterGroupLyricsChange = {},
             onEcoModeChange = {},
             onHardwareTargetChange = {},
             onThreadCountChange = {},

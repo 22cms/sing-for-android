@@ -27,7 +27,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import org.francasio.sing.R
-import org.francasio.sing.ui.components.GroupedCardItem
+import org.francasio.sing.ui.components.GroupedSection
 import org.francasio.sing.ui.components.StatusInfoRow
 import org.francasio.sing.ui.theme.*
 import org.francasio.sing.util.ModelLoader
@@ -47,9 +47,8 @@ fun StatusCard(
 ) {
     val isMaterialYou = LocalIsMaterialYou.current
 
-    Column(modifier = modifier.fillMaxWidth()) {
-        // Module Status Item
-        GroupedCardItem(index = 0, total = 2) {
+    GroupedSection(title = null, modifier = modifier) {
+        item {
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -132,11 +131,7 @@ fun StatusCard(
                 }
             }
         }
-
-        Spacer(modifier = Modifier.height(2.dp))
-
-        // Active Model Item
-        GroupedCardItem(index = 1, total = 2) {
+        item {
             Column(modifier = Modifier.padding(18.dp)) {
                 StatusInfoRow(
                     label = stringResource(id = R.string.label_neural_model),

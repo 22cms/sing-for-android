@@ -10,8 +10,7 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import org.francasio.sing.R
-import org.francasio.sing.ui.components.GroupedCardItem
-import org.francasio.sing.ui.components.SectionHeader
+import org.francasio.sing.ui.components.GroupedSection
 import org.francasio.sing.ui.components.SettingSwitchRow
 
 @Composable
@@ -26,10 +25,11 @@ fun SingSettingsCard(
     onForceSongEligibilityChange: (Boolean) -> Unit,
     modifier: Modifier = Modifier
 ) {
-    Column(modifier = modifier.fillMaxWidth()) {
-        SectionHeader(title = stringResource(id = R.string.title_sing_settings))
-
-        GroupedCardItem(index = 0, total = 4) {
+    GroupedSection(
+        title = stringResource(id = R.string.title_sing_settings),
+        modifier = modifier
+    ) {
+        item {
             SettingSwitchRow(
                 icon = painterResource(id = R.drawable.ic_preserve_sides),
                 title = stringResource(id = R.string.setting_preserve_side_title),
@@ -38,8 +38,7 @@ fun SingSettingsCard(
                 onCheckedChange = onPreserveSideChange
             )
         }
-        Spacer(modifier = Modifier.height(2.dp))
-        GroupedCardItem(index = 1, total = 4) {
+        item {
             SettingSwitchRow(
                 icon = painterResource(id = R.drawable.ic_instrumental),
                 title = stringResource(id = R.string.setting_two_way_slider_title),
@@ -48,8 +47,7 @@ fun SingSettingsCard(
                 onCheckedChange = onTwoWaySliderChange
             )
         }
-        Spacer(modifier = Modifier.height(2.dp))
-        GroupedCardItem(index = 2, total = 4) {
+        item {
             SettingSwitchRow(
                 icon = painterResource(id = R.drawable.ic_slider_unlocked),
                 title = stringResource(id = R.string.setting_full_vocal_mute_title),
@@ -58,8 +56,7 @@ fun SingSettingsCard(
                 onCheckedChange = onAllowZeroFloorChange
             )
         }
-        Spacer(modifier = Modifier.height(2.dp))
-        GroupedCardItem(index = 3, total = 4) {
+        item {
             SettingSwitchRow(
                 icon = painterResource(id = R.drawable.ic_quarternotes),
                 title = stringResource(id = R.string.setting_force_song_eligibility_title),
@@ -70,4 +67,3 @@ fun SingSettingsCard(
         }
     }
 }
-

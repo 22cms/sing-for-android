@@ -16,16 +16,23 @@
     <string name="model_info_desc" formatted="false">• Apple Sing (Vi-NNet): Official Apple Music Sing model. It runs entirely on CPU through a custom C++ engine, hence it\'s included in the app solely for reference and for comparisons with other models.\n• Kim Inst (MDX-Net, 3072 bins): High-fidelity model covering the full 22.05 kHz spectrum for s bleed-free instrumental stem extraction.\n• UVR MDX-NET 1-9703 (2048 bins): Ultra-lightweight model with low-ish latency and minimal battery consumption, ideal for sustained real-time playback.\n• ONNX Runtime (Hexagon HTP NPU &amp; CPU): Recommended for Qualcomm Snapdragon processors equipped with a Hexagon HTP NPU (FP16), or high-performance multi-threaded CPUs (FP32).\n• Alibaba MNN (OpenCL / Vulkan / NNAPI / CPU): Recommended for all other devices, providing cross-platform hardware acceleration across Qualcomm Adreno, ARM Mali, and Samsung Xclipse GPUs. Qualcomm Hexagon acceleration is also supported, but with lower performance than ONNX (~25% less).\n• FP16 vs FP32: FP16 halves memory bandwidth and is required for NPU acceleration. FP32 provides exact full precision and prevents underflow on GPUs and powerful CPUs. Running an FP32 model under NPU acceleration will usually result in an on-the-fly FP16 quantization, hence prequantized models are provided.</string>
     <string name="badge_recommended">Recommended</string>
 
+    <!-- Lyrics Settings -->
+    <string name="title_lyrics">Lyrics</string>
+    <string name="title_lyrics_settings">Lyrics</string>
+
     <!-- Sing Settings -->
     <string name="title_sing_settings">Sing Settings</string>
     <string name="setting_preserve_side_title">Preserve Vocal Side Channel</string>
-    <string name="desc_preserve_side">Uses a spectral center cut to preserve stereo backing vocals and reverb while keeping the sides audible in mono.</string>
+    <string name="desc_preserve_side">Uses a spectral center cut to preserve backing vocals, reverb, and vocoder widening and other stereo effects.</string>
 
     <string name="setting_two_way_slider_title">Two-Way Slider Mode</string>
     <string name="desc_two_way_slider" formatted="false">Splits the Sing slider range: 0–50% lowers vocals for Karaoke, while 50–100% lowers instrumentals to isolate vocals (acapella).</string>
 
     <string name="setting_center_group_lyrics_title">Center Group Lyrics</string>
     <string name="desc_center_group_lyrics">Horizontally centers collective, ensemble, and choir lyric lines in duet tracks instead of keeping them left-aligned.</string>
+
+    <string name="setting_blur_unfocused_lyrics_title">Blur Unfocused Lyrics</string>
+    <string name="desc_blur_unfocused_lyrics">Applies a blur to lyric lines that are not currently being sung, keeping the active line sharp and readable.</string>
 
     <string name="setting_full_vocal_mute_title">Remove Slider Limits</string>
     <string name="setting_full_vocal_mute_desc" formatted="false">Unlocks 0% vocal floor (full mute) and allows to be set to 100% without disabling Sing Mode.</string>
