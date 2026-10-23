@@ -2064,6 +2064,8 @@ class SingXposedEntry : XposedModule() {
 
     private var karaokeFlexId = 0
     private var karaokeBgFlexId = 0
+    private var karaokeTranslationId = 0
+    private var karaokeBgTranslationId = 0
     private var songLyricsLineId = 0
     private var lyricsLineTextSizeId = 0
     private var songLyricsLineContainerId = 0
@@ -2078,7 +2080,13 @@ class SingXposedEntry : XposedModule() {
             karaokeFlexId = res.getIdentifier("karaoke_line_flexbox", "id", TARGET_PACKAGE)
         }
         if (karaokeBgFlexId == 0) {
-            karaokeBgFlexId = res.getIdentifier("karaoke_line_flexbox_background_pronunciation", "id", TARGET_PACKAGE)
+            karaokeBgFlexId = res.getIdentifier("bg_line_flexbox", "id", TARGET_PACKAGE)
+        }
+        if (karaokeTranslationId == 0) {
+            karaokeTranslationId = res.getIdentifier("lyrics_translation_line", "id", TARGET_PACKAGE)
+        }
+        if (karaokeBgTranslationId == 0) {
+            karaokeBgTranslationId = res.getIdentifier("lyrics_bg_translation_line", "id", TARGET_PACKAGE)
         }
         if (songLyricsLineId == 0) {
             songLyricsLineId = res.getIdentifier("song_lyrics_line", "id", TARGET_PACKAGE)
@@ -2555,7 +2563,12 @@ class SingXposedEntry : XposedModule() {
                             for (flex in flexboxes) {
                                 centerFlexboxView(flex)
                             }
+                            centerKaraokeRow(itemView)
+                        } else {
+                            stopCenteringKaraokeRow(itemView)
                         }
+                    } else {
+                        stopCenteringKaraokeRow(itemView)
                     }
                 } catch (t: Throwable) {
                     logError("Failed to process lyrics row bind: ${t.message}", t)
@@ -2600,6 +2613,7 @@ class SingXposedEntry : XposedModule() {
                     if (itemView != null) {
                         boundBlurPositions.remove(itemView)
                         resetViewBlur(itemView)
+                        if (m.name == "onViewRecycled") stopCenteringKaraokeRow(itemView)
                     }
                 }
                 chain.proceed()
@@ -2713,6 +2727,68 @@ class SingXposedEntry : XposedModule() {
             logError("isLineGroupAgent error at pos $position: ${t.message}", t)
         }
         return false
+    }
+
+    private data class KaraokeCenterListeners(
+        val preDraw: android.view.ViewTreeObserver.OnPreDrawListener,
+        val attach: View.OnAttachStateChangeListener
+    )
+    private val centeredKaraokeRows = java.util.WeakHashMap<View, KaraokeCenterListeners>()
+    private val originalKaraokeTranslationGravities = java.util.WeakHashMap<TextView, Int>()
+
+    private fun centerKaraokeRow(row: ViewGroup) {
+        // Apple Music scales the *outer* ConstraintLayout, and sets its pivot
+        // back to the left/right edge when a line gains focus. Correct it just
+        // before drawing so that both focus and layout changes stay centered.
+        if (centeredKaraokeRows[row] == null) {
+            val rowRef = WeakReference(row)
+            val listener = android.view.ViewTreeObserver.OnPreDrawListener {
+                val view = rowRef.get() ?: return@OnPreDrawListener true
+                val center = view.width / 2f
+                if (view.pivotX != center) view.pivotX = center
+                centerKaraokeTranslations(view)
+                true
+            }
+            val attach = object : View.OnAttachStateChangeListener {
+                override fun onViewAttachedToWindow(view: View) {
+                    view.viewTreeObserver.addOnPreDrawListener(listener)
+                }
+                override fun onViewDetachedFromWindow(view: View) {
+                    view.viewTreeObserver.takeIf { it.isAlive }?.removeOnPreDrawListener(listener)
+                }
+            }
+            centeredKaraokeRows[row] = KaraokeCenterListeners(listener, attach)
+            row.addOnAttachStateChangeListener(attach)
+            if (row.isAttachedToWindow) row.viewTreeObserver.addOnPreDrawListener(listener)
+        }
+        row.pivotX = row.width / 2f
+        centerKaraokeTranslations(row)
+    }
+
+    private fun stopCenteringKaraokeRow(row: View) {
+        val listeners = centeredKaraokeRows.remove(row) ?: return
+        row.viewTreeObserver.takeIf { it.isAlive }?.removeOnPreDrawListener(listeners.preDraw)
+        row.removeOnAttachStateChangeListener(listeners.attach)
+        if (row is ViewGroup) {
+            for (id in intArrayOf(karaokeTranslationId, karaokeBgTranslationId)) {
+                if (id == 0) continue
+                val text = row.findViewById<TextView>(id) ?: continue
+                originalKaraokeTranslationGravities.remove(text)?.let { text.gravity = it }
+            }
+        }
+    }
+
+    private fun centerKaraokeTranslations(row: ViewGroup) {
+        for (id in intArrayOf(karaokeTranslationId, karaokeBgTranslationId)) {
+            if (id == 0) continue
+            val text = row.findViewById<TextView>(id) ?: continue
+            if (!originalKaraokeTranslationGravities.containsKey(text)) {
+                originalKaraokeTranslationGravities[text] = text.gravity
+            }
+            val gravity = (text.gravity and android.view.Gravity.RELATIVE_HORIZONTAL_GRAVITY_MASK.inv()) or
+                android.view.Gravity.CENTER_HORIZONTAL
+            if (text.gravity != gravity) text.gravity = gravity
+        }
     }
 
     private fun centerFlexboxView(view: View) {
