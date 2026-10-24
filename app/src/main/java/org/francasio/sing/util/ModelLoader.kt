@@ -272,9 +272,10 @@ object ModelLoader {
     }
 
     fun isVersionRecommended(engine: String, precision: String): Boolean {
-        if (engine.equals(SingSettings.ENGINE_NATIVE, ignoreCase = true)) {
-            return false
-        }
+        // No engine is hard-excluded here: the catalog's own isRecommended flag
+        // (parsed above) takes precedence via optBoolean, and this is only the
+        // fallback when the catalog omits it. Native Vi-NNet is treated like any
+        // other engine instead of being forced to "not recommended".
         return if (DeviceHelper.isQualcommWithHexagonHtp && isOnnxRuntimeAvailable) {
             engine.equals(SingSettings.ENGINE_ONNX, ignoreCase = true) && precision.equals("FP16", ignoreCase = true)
         } else {
@@ -327,7 +328,7 @@ object ModelLoader {
                     val precision = vObj.optString("precision", "FP16")
                     val fileName = vObj.getString("fileName")
                     val fileSizeDesc = vObj.optString("fileSizeDesc", "")
-                    val isRecommended = isVersionRecommended(engine, precision)
+                    val isRecommended = vObj.optBoolean("isRecommended", isVersionRecommended(engine, precision))
                     val vDesc = vObj.optString("description", "")
 
                     val version = ModelVersion(
@@ -397,16 +398,6 @@ object ModelLoader {
             }
         }
         dropRetiredViNNetVersions(defs, infos)
-        val vinnetDef = defs.find { it.id == "apple_sing" }
-        if (vinnetDef != null) {
-            defs.remove(vinnetDef)
-            defs.add(vinnetDef)
-        }
-        val vinnetInfos = infos.filter { it.modelId == "apple_sing" }
-        if (vinnetInfos.isNotEmpty()) {
-            infos.removeAll(vinnetInfos)
-            infos.addAll(vinnetInfos)
-        }
         return Pair(defs, infos)
     }
 

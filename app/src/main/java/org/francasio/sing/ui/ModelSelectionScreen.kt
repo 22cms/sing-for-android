@@ -474,7 +474,7 @@ private fun ModelVersionRow(
 
             Spacer(modifier = Modifier.width(12.dp))
 
-            if (isDownloaded && !isSelected && !modelInfo.isViNNet) {
+            if (isDownloaded && !isSelected) {
                 IconButton(
                     onClick = { ModelDownloader.deleteModel(context, modelInfo) },
                     modifier = Modifier.size(32.dp)
