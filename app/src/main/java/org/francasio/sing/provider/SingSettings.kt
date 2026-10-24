@@ -85,10 +85,10 @@ object SingSettings {
     var twoWaySlider: Boolean = false
 
     @Volatile
-    var centerGroupLyrics: Boolean = true
+    var centerGroupLyrics: Boolean = false
 
     @Volatile
-    var blurUnfocusedLyrics: Boolean = true
+    var blurUnfocusedLyrics: Boolean = false
 
     @Volatile
     var englishTranslationFallback: Boolean = true
@@ -137,8 +137,8 @@ object SingSettings {
         val prefs = context.getSharedPreferences(PREFS_MODULE, Context.MODE_PRIVATE)
         preserveSide = prefs.getBoolean(KEY_PRESERVE_SIDE, false)
         twoWaySlider = prefs.getBoolean(KEY_TWO_WAY_SLIDER, false)
-        centerGroupLyrics = prefs.getBoolean(KEY_CENTER_GROUP_LYRICS, true)
-        blurUnfocusedLyrics = prefs.getBoolean(KEY_BLUR_UNFOCUSED_LYRICS, true)
+        centerGroupLyrics = prefs.getBoolean(KEY_CENTER_GROUP_LYRICS, false)
+        blurUnfocusedLyrics = prefs.getBoolean(KEY_BLUR_UNFOCUSED_LYRICS, false)
         englishTranslationFallback = prefs.getBoolean(KEY_ENGLISH_TRANSLATION_FALLBACK, true)
         threadCount = prefs.getInt(KEY_THREAD_COUNT, 4)
         ecoMode = prefs.getBoolean(KEY_ECO_MODE, true)
