@@ -230,6 +230,7 @@ androidComponents {
 
 dependencies {
     testImplementation("junit:junit:4.13.2")
+    testImplementation("org.json:json:20240303")
     // Vector 2.2 and LSPatch 1.2 provide libxposed API 102 at runtime. Keep compileOnly.
     compileOnly("io.github.libxposed:api:102.0.0")
     implementation("io.github.libxposed:service:102.0.0")

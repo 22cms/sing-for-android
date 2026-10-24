@@ -1,6 +1,7 @@
 package org.francasio.sing.ui
 
 import android.content.Intent
+import android.net.Uri
 import android.os.Bundle
 import androidx.activity.BackEventCompat
 import androidx.activity.ComponentActivity
@@ -51,6 +52,8 @@ import org.francasio.sing.audio.backend.OnnxInferenceBackend
 import org.francasio.sing.util.ModelLoader
 import org.francasio.sing.R
 import org.francasio.sing.util.NativeLibDownloader
+import org.francasio.sing.update.UpdateChecker
+import org.francasio.sing.update.UpdateInfo
 import java.util.concurrent.Executors
 import kotlin.math.sin
 
@@ -90,6 +93,7 @@ class MainActivity : ComponentActivity() {
     private val runtimeDownloadProgressState = mutableFloatStateOf(0f)
     private var runtimeDownloadStarted = false
     private val showWhatsNewState = mutableStateOf(false)
+    private val availableUpdateState = mutableStateOf<UpdateInfo?>(null)
 
     private fun syncUiStatesWithSettings() {
         selectedModelIdState.value = SingSettings.selectedModelId
@@ -132,6 +136,13 @@ class MainActivity : ComponentActivity() {
         syncUiStatesWithSettings()
         bgExecutor.execute {
             ModelLoader.refreshModels(this)
+            val update = UpdateChecker.check(
+                this,
+                packageInfo.versionName ?: XposedStatus.getAppVersion(this)
+            )
+            if (update != null) {
+                runOnUiThread { availableUpdateState.value = update }
+            }
         }
 
         isModuleLoadedState.value = XposedStatus.isModuleActive(this)
@@ -481,15 +492,32 @@ class MainActivity : ComponentActivity() {
                 }
 
                 if (showWhatsNewState.value) {
-                    WhatsNewSheet(
+                    ReleaseHighlightsSheet(
+                        mode = ReleaseSheetMode.WhatsNew,
                         onDismiss = { showWhatsNewState.value = false },
-                        onConfirm = {
+                        onPrimaryAction = {
                             whatsNewPrefs.edit()
                                 .putString(WhatsNewRelease.KEY_LAST_SEEN_RELEASE, WhatsNewRelease.RELEASE_MARKER)
                                 .apply()
                             showWhatsNewState.value = false
                         }
                     )
+                } else {
+                    availableUpdateState.value?.let { update ->
+                        val deferUpdate = {
+                            UpdateChecker.defer(this@MainActivity, update.tagName)
+                            availableUpdateState.value = null
+                        }
+                        ReleaseHighlightsSheet(
+                            mode = ReleaseSheetMode.UpdateAvailable(update),
+                            onDismiss = deferUpdate,
+                            onPrimaryAction = {
+                                availableUpdateState.value = null
+                                startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(update.releaseUrl)))
+                            },
+                            onSecondaryAction = deferUpdate
+                        )
+                    }
                 }
             }
         }

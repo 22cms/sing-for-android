@@ -49,9 +49,11 @@ import org.francasio.sing.ui.theme.Accent2_900
 import org.francasio.sing.ui.theme.LocalIsMaterialYou
 import org.francasio.sing.ui.theme.Primary
 import org.francasio.sing.ui.theme.SurfaceDark
+import org.francasio.sing.ui.theme.SurfaceContainerHigh
 import org.francasio.sing.ui.theme.TextPrimary
 import org.francasio.sing.ui.theme.TextSecondary
 import org.francasio.sing.util.XposedStatus
+import org.francasio.sing.update.UpdateInfo
 
 private data class WhatsNewFeature(val icon: Int, val title: Int, val description: Int)
 
@@ -65,9 +67,19 @@ private val releaseFeatures = listOf(
 // Add minor change string IDs here in later releases; omit the disclosure when empty.
 private val minorChanges: List<Int> = emptyList()
 
+sealed interface ReleaseSheetMode {
+    data object WhatsNew : ReleaseSheetMode
+    data class UpdateAvailable(val update: UpdateInfo) : ReleaseSheetMode
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun WhatsNewSheet(onDismiss: () -> Unit, onConfirm: () -> Unit) {
+fun ReleaseHighlightsSheet(
+    mode: ReleaseSheetMode,
+    onDismiss: () -> Unit,
+    onPrimaryAction: () -> Unit,
+    onSecondaryAction: () -> Unit = onDismiss
+) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val context = LocalContext.current
     val appVersion = remember(context) { XposedStatus.getAppVersion(context) }
@@ -75,6 +87,16 @@ fun WhatsNewSheet(onDismiss: () -> Unit, onConfirm: () -> Unit) {
     var showMinorChanges by remember { mutableStateOf(false) }
     var isConfirming by remember { mutableStateOf(false) }
     val coroutineScope = rememberCoroutineScope()
+    val update = (mode as? ReleaseSheetMode.UpdateAvailable)?.update
+
+    fun hideThen(action: () -> Unit) {
+        if (isConfirming) return
+        isConfirming = true
+        coroutineScope.launch {
+            sheetState.hide()
+            action()
+        }
+    }
 
     ModalBottomSheet(
         onDismissRequest = { if (!isConfirming) onDismiss() },
@@ -88,7 +110,11 @@ fun WhatsNewSheet(onDismiss: () -> Unit, onConfirm: () -> Unit) {
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
                 Text(
-                    text = stringResource(R.string.whats_new_heading),
+                    text = if (update == null) {
+                        stringResource(R.string.whats_new_heading)
+                    } else {
+                        stringResource(R.string.update_available_heading)
+                    },
                     color = TextPrimary,
                     fontSize = 30.sp,
                     fontWeight = FontWeight.Bold,
@@ -97,7 +123,15 @@ fun WhatsNewSheet(onDismiss: () -> Unit, onConfirm: () -> Unit) {
                 )
                 Spacer(modifier = Modifier.height(4.dp))
                 Text(
-                    text = stringResource(R.string.whats_new_version, appVersion),
+                    text = if (update == null) {
+                        stringResource(R.string.whats_new_version, appVersion)
+                    } else {
+                        stringResource(
+                            R.string.update_available_version,
+                            update.currentVersion,
+                            update.availableVersion
+                        )
+                    },
                     color = TextSecondary,
                     fontSize = 14.sp,
                     textAlign = TextAlign.Center
@@ -113,11 +147,18 @@ fun WhatsNewSheet(onDismiss: () -> Unit, onConfirm: () -> Unit) {
                     .padding(horizontal = 24.dp),
                 verticalArrangement = Arrangement.spacedBy(24.dp)
             ) {
-                releaseFeatures.forEach { feature ->
-                    FeatureRow(feature)
+                if (update != null) {
+                    Text(
+                        text = update.releaseNotes,
+                        color = TextSecondary,
+                        fontSize = 15.sp,
+                        lineHeight = 22.sp
+                    )
+                } else {
+                    releaseFeatures.forEach { feature -> FeatureRow(feature) }
                 }
 
-                if (minorChanges.isNotEmpty()) {
+                if (update == null && minorChanges.isNotEmpty()) {
                     Column(modifier = Modifier.animateContentSize()) {
                         TextButton(onClick = { showMinorChanges = !showMinorChanges }) {
                             Text(stringResource(R.string.whats_new_minor_changes), color = Primary)
@@ -142,29 +183,42 @@ fun WhatsNewSheet(onDismiss: () -> Unit, onConfirm: () -> Unit) {
 
             Spacer(modifier = Modifier.height(16.dp))
             HorizontalDivider(color = TextSecondary.copy(alpha = 0.15f))
-            Button(
-                onClick = {
-                    if (!isConfirming) {
-                        isConfirming = true
-                        coroutineScope.launch {
-                            sheetState.hide()
-                            onConfirm()
-                        }
-                    }
-                },
+            Column(
                 modifier = Modifier
                     .fillMaxWidth()
                     .navigationBarsPadding()
-                    .padding(horizontal = 24.dp, vertical = 16.dp)
-                    .height(48.dp),
-                colors = ButtonDefaults.buttonColors(containerColor = Primary)
+                    .padding(horizontal = 24.dp, vertical = 16.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                Text(
-                    text = stringResource(R.string.whats_new_close),
-                    color = buttonTextColor,
-                    fontSize = 14.sp,
-                    fontWeight = FontWeight.Bold
-                )
+                Button(
+                    onClick = { hideThen(onPrimaryAction) },
+                    modifier = Modifier.fillMaxWidth().height(48.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = Primary)
+                ) {
+                    Text(
+                        text = stringResource(
+                            if (update == null) R.string.whats_new_close
+                            else R.string.update_available_downloads
+                        ),
+                        color = buttonTextColor,
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+                if (update != null) {
+                    Button(
+                        onClick = { hideThen(onSecondaryAction) },
+                        modifier = Modifier.fillMaxWidth().height(48.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = SurfaceContainerHigh)
+                    ) {
+                        Text(
+                            text = stringResource(R.string.update_available_later),
+                            color = TextPrimary,
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                }
             }
         }
     }

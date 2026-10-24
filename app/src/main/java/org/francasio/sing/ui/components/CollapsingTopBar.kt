@@ -207,13 +207,7 @@ fun BoxScope.ExpressiveCollapsingTopBar(
                     .offset(x = circleX, y = circleY)
                     .size(circleSize)
                     .clip(CircleShape)
-                    .background(
-                        if (progress >= 0.5f) {
-                            SurfaceContainerHigh.copy(alpha = 0.7f + progress * 0.3f)
-                        } else {
-                            Primary.copy(alpha = 0.16f * (1f - progress))
-                        }
-                    )
+                    .background(SurfaceContainerHigh.copy(alpha = 0.7f + progress * 0.3f))
                     .clickable {
                         if (progress <= 0.05f && morphArrowAlpha <= 0.1f) {
                             SingSettings.setBackTipLearned(context, true)
@@ -266,13 +260,7 @@ fun BoxScope.ExpressiveCollapsingTopBar(
                     .offset(x = circleX, y = circleY)
                     .size(circleSize)
                     .clip(CircleShape)
-                    .background(
-                        if (progress >= 0.5f) {
-                            SurfaceContainerHigh.copy(alpha = 0.7f + progress * 0.3f)
-                        } else {
-                            Primary.copy(alpha = 0.16f * (1f - progress))
-                        }
-                    )
+                    .background(SurfaceContainerHigh.copy(alpha = 0.7f + progress * 0.3f))
                     .clickable(onClick = navigationIcon.onBack),
                 contentAlignment = Alignment.Center
             ) {

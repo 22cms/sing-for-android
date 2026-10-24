@@ -1,6 +1,6 @@
 package org.francasio.sing.ui
 
-/** Bump this marker only when the release notes in [WhatsNewSheet] change. */
+/** Bump this marker only when the notes in [ReleaseHighlightsSheet] change. */
 internal object WhatsNewRelease {
     const val RELEASE_MARKER = "1.1-lyrics-and-audio-update"
     const val PREFS_NAME = "whats_new"
