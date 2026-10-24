@@ -89,6 +89,7 @@ class MainActivity : ComponentActivity() {
     private val runtimeDownloadLabelState = mutableStateOf("")
     private val runtimeDownloadProgressState = mutableFloatStateOf(0f)
     private var runtimeDownloadStarted = false
+    private val showWhatsNewState = mutableStateOf(false)
 
     private fun syncUiStatesWithSettings() {
         selectedModelIdState.value = SingSettings.selectedModelId
@@ -113,6 +114,18 @@ class MainActivity : ComponentActivity() {
         )
         super.onCreate(savedInstanceState)
         openedFromMusicState.value = intent?.getBooleanExtra("from_apple_music", false) ?: false
+
+        val packageInfo = packageManager.getPackageInfo(packageName, 0)
+        val whatsNewPrefs = getSharedPreferences(WhatsNewRelease.PREFS_NAME, MODE_PRIVATE)
+        val lastSeenRelease = whatsNewPrefs.getString(WhatsNewRelease.KEY_LAST_SEEN_RELEASE, null)
+        showWhatsNewState.value = WhatsNewRelease.shouldShow(
+            lastSeenRelease,
+            packageInfo.firstInstallTime,
+            packageInfo.lastUpdateTime
+        )
+        if (!showWhatsNewState.value && lastSeenRelease == null) {
+            whatsNewPrefs.edit().putString(WhatsNewRelease.KEY_LAST_SEEN_RELEASE, WhatsNewRelease.RELEASE_MARKER).apply()
+        }
 
         SingSettings.loadLocal(this)
         ModelLoader.loadModels(this)
@@ -455,6 +468,9 @@ class MainActivity : ComponentActivity() {
                                     materialYouState.value = enabled
                                     SingSettings.setMaterialYou(this@MainActivity, enabled)
                                 },
+                                onVersionClick = {
+                                    showWhatsNewState.value = true
+                                },
                                 onBack = {
                                     closedViaPredictiveBack = false
                                     currentScreenState.value = AppScreen.MAIN
@@ -462,6 +478,18 @@ class MainActivity : ComponentActivity() {
                             )
                         }
                     }
+                }
+
+                if (showWhatsNewState.value) {
+                    WhatsNewSheet(
+                        onDismiss = { showWhatsNewState.value = false },
+                        onConfirm = {
+                            whatsNewPrefs.edit()
+                                .putString(WhatsNewRelease.KEY_LAST_SEEN_RELEASE, WhatsNewRelease.RELEASE_MARKER)
+                                .apply()
+                            showWhatsNewState.value = false
+                        }
+                    )
                 }
             }
         }

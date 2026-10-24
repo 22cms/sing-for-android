@@ -1,5 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <string name="whats_new_heading">Novità di Sing for Android</string>
+    <string name="whats_new_version">Versione %1$s</string>
+        <string name="whats_new_minor_changes">Mostra cambiamenti minori</string>
+    <string name="whats_new_close">Chiudi</string>
     <string name="xposed_description">Una reimplementazione della modalità Apple Music Sing per Android eseguita puramente in locale con accelerazione Hardware</string>
     <string name="open_apple_music">Apri Apple Music</string>
 

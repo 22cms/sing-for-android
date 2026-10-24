@@ -72,6 +72,7 @@ private data class ThirdPartyProject(
 fun InfoScreen(
     materialYou: Boolean,
     onToggleMaterialYou: (Boolean) -> Unit,
+    onVersionClick: () -> Unit,
     onBack: () -> Unit
 ) {
     val context = LocalContext.current
@@ -203,6 +204,7 @@ fun InfoScreen(
                         modifier = Modifier
                             .clip(RoundedCornerShape(8.dp))
                             .background(SurfaceContainerHigh)
+                            .clickable(onClick = onVersionClick)
                             .padding(horizontal = 10.dp, vertical = 4.dp)
                     ) {
                         Text(
@@ -315,4 +317,3 @@ fun InfoScreen(
         )
     }
 }
-

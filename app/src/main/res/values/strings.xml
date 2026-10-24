@@ -4,6 +4,20 @@
     <string name="xposed_description">A reimplementation of Apple Music Sing mode for Android with on-device Hardware accelerated stem separation.</string>
     <string name="open_apple_music">Launch Apple Music</string>
 
+    <!-- Release notes (feature descriptions are English-only; update for each featured release) -->
+    <string name="whats_new_heading">What’s New in Sing for Android</string>
+    <string name="whats_new_version">Version %1$s</string>
+    <string name="whats_new_title_1" translatable="false">A Lighter Download</string>
+    <string name="whats_new_desc_1" translatable="false">Hardware acceleration libraries now download only when needed for your device, reducing the app’s storage footprint by up to 96%.</string>
+    <string name="whats_new_title_2" translatable="false">Lyrics Enhancements</string>
+    <string name="whats_new_desc_2" translatable="false">Blur unfocused lines, center chorus lyrics, and optionally use Apple’s English translation when one isn’t available in your system language.</string>
+    <string name="whats_new_title_3" translatable="false">Better Side-Channel Preservation</string>
+    <string name="whats_new_desc_3" translatable="false">Spectral processing preserves backing vocals and stereo effects more faithfully, with improved mono compatibility.</string>
+    <string name="whats_new_title_4" translatable="false">Update Highlights and Automatic Checking</string>
+    <string name="whats_new_desc_4" translatable="false">Sing for Android now looks for updates automatically and shows you what’s new in a pop-up.</string>
+    <string name="whats_new_minor_changes">Show minor changes</string>
+    <string name="whats_new_close">Close</string>
+
     <!-- Module Status -->
     <string name="status_loaded">Module Loaded</string>
     <string name="status_no_model_selected">No model selected</string>
