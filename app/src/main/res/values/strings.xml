@@ -18,7 +18,7 @@
     <string name="whats_new_minor_changes">Show minor changes</string>
     <string name="whats_new_close">Close</string>
     <string name="update_available_heading">New Update Available</string>
-    <string name="update_available_version" translatable="false">v%1$s➔v%2$s</string>
+    <string name="update_available_version" translatable="false">v%1$s ➔ v%2$s</string>
     <string name="update_available_downloads">Go to Downloads</string>
     <string name="update_available_later">Later</string>
 

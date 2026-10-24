@@ -176,7 +176,7 @@ fun InfoScreen(
                             painter = painterResource(id = R.drawable.ic_sing),
                             contentDescription = null,
                             tint = if (isMaterialYou) Accent1_100 else Color.White,
-                            modifier = Modifier.size(38.dp)
+                            modifier = Modifier.size(42.dp)
                         )
                     }
 
