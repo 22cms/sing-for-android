@@ -28,6 +28,7 @@ class SingSettingsProvider : ContentProvider() {
                     putBoolean(SingSettings.KEY_TWO_WAY_SLIDER, SingSettings.twoWaySlider)
                     putBoolean(SingSettings.KEY_CENTER_GROUP_LYRICS, SingSettings.centerGroupLyrics)
                     putBoolean(SingSettings.KEY_BLUR_UNFOCUSED_LYRICS, SingSettings.blurUnfocusedLyrics)
+                    putBoolean(SingSettings.KEY_ENGLISH_TRANSLATION_FALLBACK, SingSettings.englishTranslationFallback)
                     putInt(SingSettings.KEY_THREAD_COUNT, SingSettings.threadCount)
                     putBoolean(SingSettings.KEY_ECO_MODE, SingSettings.ecoMode)
                     putString(SingSettings.KEY_HARDWARE_TARGET, SingSettings.hardwareTarget)

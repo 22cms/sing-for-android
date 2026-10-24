@@ -1,46 +1,38 @@
 package org.francasio.sing
 
 import android.app.Application
-import android.content.ComponentName
 import android.content.Context
-import android.content.Intent
 import android.content.pm.ApplicationInfo
 import android.graphics.Canvas
 import android.graphics.ColorFilter
 import android.graphics.Rect
-import android.graphics.RenderEffect
-import android.graphics.Shader
 import android.graphics.drawable.BitmapDrawable
 import android.graphics.drawable.Drawable
 import android.graphics.drawable.GradientDrawable
-import android.os.Build
-import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
 import android.util.Log
-import android.view.HapticFeedbackConstants
-import android.view.LayoutInflater
 import android.view.MotionEvent
 import android.view.View
-import android.view.ViewConfiguration
 import android.view.ViewGroup
 import android.widget.ImageView
-import android.widget.TextView
 import io.github.libxposed.api.XposedInterface
 import io.github.libxposed.api.XposedModule
 import io.github.libxposed.api.XposedModuleInterface
+import org.francasio.sing.audio.AudioProcessorBridge
 import org.francasio.sing.audio.SingAudioProcessor
 import org.francasio.sing.clock.MediaClockSyncHook
+import org.francasio.sing.hooks.AudioPipelineHooks
+import org.francasio.sing.hooks.LyricsHooks
+import org.francasio.sing.hooks.VocalControlHooks
 import org.francasio.sing.util.ReflectionUtils
 import java.io.File
 import java.io.FileOutputStream
 import java.lang.ref.WeakReference
 import java.lang.reflect.Executable
 import java.lang.reflect.Field
-import java.nio.ByteBuffer
 import java.util.zip.ZipFile
-import kotlin.math.roundToInt
 
 private class ExactSizeDrawable(
     private val delegate: Drawable,
@@ -70,16 +62,77 @@ private class ExactSizeDrawable(
  */
 class SingXposedEntry : XposedModule() {
 
+    private val audioProcessorBridge = AudioProcessorBridge(
+        resolveModuleApkPath = ::resolveModuleApkPath,
+        resolveManagerInfo = {
+            detectedManagerInfo ?: detectXposedManager()
+        },
+        onManagerInfoResolved = { detectedManagerInfo = it },
+        onEngineReady = { onEngineReady() },
+        onSettingsChanged = { onSettingsChanged() },
+        logInfo = ::logInfo,
+        logError = ::logError
+    )
+
+    private val vocalControlHooks by lazy {
+        VocalControlHooks(
+            mainHandler = mainHandler,
+            audioProcessor = { audioProcessor },
+            onVocalControlSeen = { currentVocalCtrl = WeakReference(it) },
+            currentVocalControl = { currentVocalCtrl?.get() },
+            attachScrollWheelHandler = ::attachScrollWheelHandler,
+            getSliderFraction = ::getVocalSliderFraction,
+            setSliderFraction = ::setVocalSliderFractionField,
+            updateSliderIcon = ::updateSliderIcon,
+            defaultVocalFloor = { defaultM0 },
+            onSingModeChanged = ::onSingModeChanged,
+            logInfo = ::logInfo,
+            logError = ::logError
+        )
+    }
+
+    private val audioPipelineHooks by lazy {
+        AudioPipelineHooks(
+            audioProcessorProvider = { audioProcessor },
+            onSingModeChanged = ::onSingModeChanged,
+            registerHook = { executable, hooker -> hookMethod(executable, hooker = hooker) },
+            logInfo = ::logInfo,
+            logError = ::logError
+        )
+    }
+
+    private val lyricsHooks by lazy {
+        LyricsHooks(
+            mainHandler = mainHandler,
+            audioProcessorProvider = { audioProcessor },
+            registerHook = { executable, hooker -> hookMethod(executable, hooker = hooker) },
+            onVocalControlSeen = { currentVocalCtrl = WeakReference(it) },
+            currentVocalControlProvider = { currentVocalCtrl?.get() },
+            updateVocalAttenuationFloor = ::updateVocalAttenuationFloor,
+            updateSliderIconCallback = ::updateSliderIcon,
+            attachScrollWheelHandler = ::attachScrollWheelHandler,
+            installVocalControlHooks = { vocalClass, classLoader ->
+                vocalControlHooks.install(vocalClass, classLoader) { executable, hooker ->
+                    hookMethod(executable, hooker = hooker)
+                }
+            },
+            onSingModeChanged = ::onSingModeChanged,
+            losslessBadgeSuppressed = { isLosslessBadgeSuppressed },
+            logInfo = ::logInfo,
+            logError = ::logError
+        )
+    }
+
     init {
         instance = this
     }
 
     companion object {
         var instance: SingXposedEntry? = null
-        var lyricsRecyclerView: WeakReference<ViewGroup>? = null
         private const val TAG = "AppleMusicSing"
         private const val TARGET_PACKAGE = "com.apple.android.music"
-        private var audioProcessor: SingAudioProcessor? = null
+        private val audioProcessor: SingAudioProcessor?
+            get() = instance?.audioProcessorBridge?.processor
         var resolvedModulePath: String?
             get() = org.francasio.sing.provider.SingSettings.resolvedModulePath
             set(value) {
@@ -104,20 +157,18 @@ class SingXposedEntry : XposedModule() {
                 }
                 return h
             }
-        var currentLyricsView: WeakReference<View>? = null
-        var currentLosslessBadge: WeakReference<View>? = null
         var currentVocalCtrl: WeakReference<View>? = null
-        var currentLocalPlayerController: WeakReference<Any>? = null
-        var currentLyricsFragment: WeakReference<Any>? = null
 
         fun onEngineReady() {
             mainHandler.post {
-                Log.i(TAG, "Neural engine is ready! Revealing Sing button...")
-                val frag = currentLyricsFragment?.get()
-                if (frag != null) {
+                Log.i(TAG, "Neural engine is ready!")
+                val frag = instance?.lyricsHooks?.currentLyricsFragment?.get()
+                if (frag != null && org.francasio.sing.provider.SingSettings.forceSongEligibility) {
+                    // Only force-reveal on tracks that are eligible for Sing;
+                    // never override the host's own hide decision otherwise.
                     try {
                         ReflectionUtils.callMethod(frag, "D2", true)
-                        Log.i(TAG, "Called D2(true) on PlayerLyricsViewFragment")
+                        Log.i(TAG, "Called D2(true) on PlayerLyricsViewFragment (forceSongEligibility)")
                     } catch (t: Throwable) {
                         Log.e(TAG, "Failed to call D2(true) on lyrics fragment: ${t.message}")
                     }
@@ -141,8 +192,6 @@ class SingXposedEntry : XposedModule() {
         var isLosslessBadgeSuppressed: Boolean = false
         var cachedVacClass: Class<*>? = null
         private var defaultM0: Float? = null
-        private var lastLongPressTime: Long = 0L
-        private var lastSettingsLaunchTime: Long = 0L
 
         private var cachedFloorFieldName: String? = null
 
@@ -217,9 +266,7 @@ class SingXposedEntry : XposedModule() {
             }
             cachedVacClass?.let { updateVocalAttenuationFloor(it) }
             currentVocalCtrl?.get()?.let { updateSliderIcon(it) }
-            lyricsRecyclerView?.get()?.let { rv ->
-                instance?.scheduleBlurUpdate(rv)
-            }
+            instance?.lyricsHooks?.onSettingsChanged()
         }
 
         fun getVocalSliderFraction(vocalCtrl: View): Float {
@@ -247,11 +294,7 @@ class SingXposedEntry : XposedModule() {
         private var pendingVocalFraction: Float? = null
         private val debouncedPlayerSyncRunnable = Runnable {
             val fraction = pendingVocalFraction ?: return@Runnable
-            try {
-                currentLocalPlayerController?.get()?.let { ctrl ->
-                    ReflectionUtils.callMethod(ctrl, "setVocalAttenuationLevel", fraction)
-                }
-            } catch (_: Throwable) {}
+            instance?.vocalControlHooks?.syncPlayerVocalLevel(fraction)
             try {
                 currentVocalCtrl?.get()?.let { vocalCtrl ->
                     val lCallback = ReflectionUtils.getObjectField(vocalCtrl, "L")
@@ -369,12 +412,12 @@ class SingXposedEntry : XposedModule() {
         }
 
         fun getLosslessBadge(): View? {
-            currentLosslessBadge?.get()?.let { return it }
-            currentLyricsView?.get()?.let { lyricsView ->
+            instance?.lyricsHooks?.currentLosslessBadge?.get()?.let { return it }
+            instance?.lyricsHooks?.currentLyricsView?.get()?.let { lyricsView ->
                 val badgeId = lyricsView.resources.getIdentifier("audio_badge_with_text", "id", TARGET_PACKAGE)
                 if (badgeId != 0) {
                     lyricsView.findViewById<View>(badgeId)?.let {
-                        currentLosslessBadge = WeakReference(it)
+                        instance?.lyricsHooks?.rememberLosslessBadge(it)
                         return it
                     }
                 }
@@ -423,25 +466,6 @@ class SingXposedEntry : XposedModule() {
                 }
                 currentVocalCtrl?.get()?.let { updateSliderIcon(it) }
             }
-        }
-
-        fun isAllowedAudioFormat(mimeType: String?): Boolean {
-            if (mimeType.isNullOrEmpty()) return false
-            val m = mimeType.trim().lowercase()
-            // Exclude Dolby Audio (AC-3, E-AC-3, AC-4) and Dolby Atmos (E-AC-3 JOC)
-            if (m.contains("ac3") || m.contains("ac-3") || m.contains("ec-3") || m.contains("joc")) {
-                return false
-            }
-            // Allow AAC, ALAC, and AAC-HE
-            return m == "audio/mp4a-latm" ||
-                   m == "audio/alac" ||
-                   m == "audio/aac" ||
-                   m == "audio/he-aac" ||
-                   m == "audio/aac-he" ||
-                   m == "alac" ||
-                   m.contains("alac") ||
-                   m.contains("mp4a") ||
-                   m.contains("aac")
         }
 
         private fun getInstrumentalDrawable(context: Context): Drawable? {
@@ -670,12 +694,10 @@ class SingXposedEntry : XposedModule() {
     }
 
     private fun installHooks(cl: ClassLoader, appInfo: ApplicationInfo?) {
-        hookApplicationInit(cl, appInfo)
-        hookVocalAttenuationState(cl)
-        hookTrackEligibility(cl)
-        hookAudioProcessorScaffolding(cl)
+        hookApplicationInit(cl)
+        audioPipelineHooks.install(cl)
         hookPlaybackController(cl)
-        hookLyricsUI(cl)
+        lyricsHooks.install(cl)
         hookCrossFade(cl)
         MediaClockSyncHook.hook(this, cl)
     }
@@ -683,7 +705,7 @@ class SingXposedEntry : XposedModule() {
     /**
      * Hook Application / Context initialization to instantiate SingAudioProcessor.
      */
-    private fun hookApplicationInit(cl: ClassLoader, appInfo: ApplicationInfo?) {
+    private fun hookApplicationInit(cl: ClassLoader) {
         try {
             val attachMethod = ReflectionUtils.findMethod(Application::class.java, "attach", Context::class.java)
             if (attachMethod != null) {
@@ -697,7 +719,7 @@ class SingXposedEntry : XposedModule() {
                             // Fallback safety: if AppleMusicApplication.onCreate never fires, init after 5s
                             mainHandler.postDelayed({
                                 if (!applicationContextReady && hostAppContext != null) {
-                                    onApplicationContextReady(hostAppContext!!, appInfo)
+                                    onApplicationContextReady(hostAppContext!!)
                                 }
                             }, 5000L)
                         }
@@ -720,7 +742,7 @@ class SingXposedEntry : XposedModule() {
                         val result = chain.proceed()
                         isAppleMusicAppCreated = true
                         (chain.thisObject as? Context)?.let { ctx ->
-                            onApplicationContextReady(ctx, appInfo)
+                            onApplicationContextReady(ctx)
                         }
                         cachedVacClass?.let { updateVocalAttenuationFloor(it) }
                         result
@@ -734,80 +756,16 @@ class SingXposedEntry : XposedModule() {
     }
 
     @Synchronized
-    private fun onApplicationContextReady(context: Context, appInfo: ApplicationInfo?) {
+    private fun onApplicationContextReady(context: Context) {
         if (applicationContextReady) return
         applicationContextReady = true
 
         val appContext = context.applicationContext ?: context
         hostAppContext = appContext
-        try {
-            val prefs = appContext.getSharedPreferences("apple_sing_cache", Context.MODE_PRIVATE)
-            org.francasio.sing.provider.SingSettings.allowZeroFloor = prefs.getBoolean(org.francasio.sing.provider.SingSettings.KEY_ALLOW_ZERO_FLOOR, true)
-            org.francasio.sing.provider.SingSettings.twoWaySlider = prefs.getBoolean(org.francasio.sing.provider.SingSettings.KEY_TWO_WAY_SLIDER, false)
-            org.francasio.sing.provider.SingSettings.preserveSide = prefs.getBoolean(org.francasio.sing.provider.SingSettings.KEY_PRESERVE_SIDE, false)
-            org.francasio.sing.provider.SingSettings.forceSongEligibility = prefs.getBoolean(org.francasio.sing.provider.SingSettings.KEY_FORCE_SONG_ELIGIBILITY, true)
-            org.francasio.sing.provider.SingSettings.centerGroupLyrics = prefs.getBoolean(org.francasio.sing.provider.SingSettings.KEY_CENTER_GROUP_LYRICS, true)
-            org.francasio.sing.provider.SingSettings.blurUnfocusedLyrics = prefs.getBoolean(org.francasio.sing.provider.SingSettings.KEY_BLUR_UNFOCUSED_LYRICS, true)
-        } catch (_: Throwable) {}
-
-        // Schedule async initialization when the main looper is idle or after cold-start UI renders
-        val initAction = Runnable {
-            java.util.concurrent.Executors.newSingleThreadExecutor { r ->
-                Thread({
-                    android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_BACKGROUND)
-                    r.run()
-                }, "AppleSing_XposedInit")
-            }.execute {
-                try {
-                    val path = resolveModuleApkPath(appContext, appInfo)
-                    val manager = detectedManagerInfo ?: detectXposedManager().also { detectedManagerInfo = it }
-                    org.francasio.sing.provider.SingSettings.sendHeartbeat(appContext, manager)
-
-                    if (path != null) {
-                        resolvedModulePath = path
-                        try {
-                            appContext.getSharedPreferences("apple_sing_cache", Context.MODE_PRIVATE)
-                                .edit()
-                                .putString("resolved_module_apk_path", path)
-                                .apply()
-                        } catch (_: Throwable) {}
-                        val processor = SingAudioProcessor(appContext, path)
-                        processor.onEngineReadyListener = {
-                            onEngineReady()
-                        }
-                        audioProcessor = processor
-                        if (processor.isEngineReady) {
-                            onEngineReady()
-                        }
-                        logInfo("SingAudioProcessor initialized in background from $path (manager=$manager)")
-                    } else {
-                        logError("Failed to resolve module APK path")
-                    }
-                } catch (e: Throwable) {
-                    logError("Failed to initialize SingAudioProcessor", e)
-                }
-            }
-        }
-
-        var executed = false
-        val safeRunner = Runnable {
-            if (!executed) {
-                executed = true
-                initAction.run()
-            }
-        }
-        try {
-            Looper.getMainLooper().queue.addIdleHandler {
-                safeRunner.run()
-                false
-            }
-            mainHandler.postDelayed(safeRunner, 1500L)
-        } catch (_: Throwable) {
-            safeRunner.run()
-        }
+        audioProcessorBridge.initializeWhenIdle(appContext, mainHandler)
     }
 
-    private fun resolveModuleApkPath(context: Context, appInfo: ApplicationInfo?): String? {
+    private fun resolveModuleApkPath(context: Context): String? {
         // 0. Cached path in SharedPreferences (instant, 0ms)
         try {
             val cached = context.getSharedPreferences("apple_sing_cache", Context.MODE_PRIVATE)
@@ -878,439 +836,12 @@ class SingXposedEntry : XposedModule() {
     }
 
     /**
-     * 1. Hook VocalAttenuationStateProvider checks:
-     *    - isDeviceSupported() -> true
-     *    - isCodecInputSupported(mimeType) -> true for AAC, ALAC, AAC-HE; false for Dolby Audio & Atmos
-     */
-    private fun hookVocalAttenuationState(cl: ClassLoader) {
-        try {
-            val companionClass = ReflectionUtils.findClass(
-                "com.apple.android.music.playback.player.VocalAttenuationStateProvider\$Companion",
-                cl
-            )
-            if (companionClass != null) {
-                ReflectionUtils.findMethod(companionClass, "isDeviceSupported")?.let { m ->
-                    hookMethod(m) { true }
-                }
-                ReflectionUtils.findMethod(companionClass, "isCodecInputSupported", String::class.java)?.let { m ->
-                    hookMethod(m) { chain ->
-                        val mime = chain.getArg(0) as? String
-                        val allowed = isAllowedAudioFormat(mime)
-                        logInfo("isCodecInputSupported(mime=$mime) -> $allowed")
-                        allowed
-                    }
-                }
-                logInfo("Hooked VocalAttenuationStateProvider.Companion (device=true, codec allowed on AAC/ALAC/AAC-HE only)")
-            }
-        } catch (e: Throwable) {
-            logError("Failed to hook VocalAttenuationStateProvider.Companion", e)
-        }
-    }
-
-    /**
-     * 2. Hook playback/queue items to report isVocalAttenuationAllowed based on forceSongEligibility setting
-     */
-    private fun hookTrackEligibility(cl: ClassLoader) {
-        val mediaItemClasses = listOf(
-            "com.apple.android.music.model.BasePlaybackItem",
-            "com.apple.android.music.playback.model.StoreMediaItem",
-            "com.apple.android.music.playback.model.LibraryMediaItem",
-            "com.apple.android.music.playback.model.RadioMediaItem"
-        )
-        for (clsName in mediaItemClasses) {
-            try {
-                val cls = ReflectionUtils.findClass(clsName, cl)
-                if (cls != null) {
-                    ReflectionUtils.findMethod(cls, "isVocalAttenuationAllowed")?.let { m ->
-                        hookMethod(m) { chain ->
-                            val isReady = audioProcessor?.isEngineReady == true
-                            if (isReady && org.francasio.sing.provider.SingSettings.forceSongEligibility) {
-                                true
-                            } else if (!isReady) {
-                                false
-                            } else {
-                                chain.proceed()
-                            }
-                        }
-                        logInfo("Hooked isVocalAttenuationAllowed on $clsName (forceSongEligibility togglable, guarded by isEngineReady)")
-                    }
-                }
-            } catch (e: Throwable) {
-                logError("Could not hook isVocalAttenuationAllowed on $clsName", e)
-            }
-        }
-    }
-
-    /**
-     * 3. Hook VocalsAudioProcessor:
-     *    - Force FORCE_DISABLE to false
-     *    - Route audio frames through SingAudioProcessor (ONNX + STFT)
-     *    - Neutralize PremResampleAudioProcessor so 24-bit Lossless never throws UnhandledAudioFormatException
-     *    - Filter SVAudioRendererV2.createAudioProcessors to return [VocalsAudioProcessor] only
-     */
-    private fun hookAudioProcessorScaffolding(cl: ClassLoader) {
-        try {
-            val resampleClass = ReflectionUtils.findClass(
-                "com.apple.android.music.playback.processors.PremResampleAudioProcessor",
-                cl
-            )
-            val audioFormatClass = ReflectionUtils.findClass(
-                "com.google.android.exoplayer2.audio.AudioProcessor\$AudioFormat",
-                cl
-            )
-            if (resampleClass != null && audioFormatClass != null) {
-                val notSetFormat = ReflectionUtils.getStaticObjectField(audioFormatClass, "NOT_SET")
-                val configureMethod = ReflectionUtils.findMethod(resampleClass, "configure", audioFormatClass)
-                if (configureMethod != null) {
-                    hookMethod(configureMethod) { notSetFormat }
-                    logInfo("Successfully neutralized PremResampleAudioProcessor.configure")
-                }
-            }
-        } catch (e: Throwable) {
-            logError("Failed to neutralize PremResampleAudioProcessor", e)
-        }
-
-        try {
-            val rendererClass = ReflectionUtils.findClass(
-                "com.apple.android.music.playback.renderer.SVAudioRendererV2",
-                cl
-            )
-            if (rendererClass != null) {
-                ReflectionUtils.findMethod(rendererClass, "createAudioProcessors")?.let { m ->
-                    hookMethod(m) { chain ->
-                        val array = chain.proceed() as? Array<*>
-                        val vocalsProcessor = array?.firstOrNull { it != null && it.javaClass.name.contains("VocalsAudioProcessor") }
-                        if (vocalsProcessor != null) {
-                            val audioProcessorClass = ReflectionUtils.findClass(
-                                "com.google.android.exoplayer2.audio.AudioProcessor",
-                                cl
-                            )
-                            if (audioProcessorClass != null) {
-                                @Suppress("UNCHECKED_CAST")
-                                val newArray = java.lang.reflect.Array.newInstance(audioProcessorClass, 1) as Array<Any>
-                                newArray[0] = vocalsProcessor
-                                logInfo("SVAudioRendererV2.createAudioProcessors filtered to [VocalsAudioProcessor] only")
-                                return@hookMethod newArray
-                            }
-                        }
-                        array
-                    }
-                    logInfo("Successfully hooked SVAudioRendererV2.createAudioProcessors()")
-                }
-
-                ReflectionUtils.findMethod(rendererClass, "onPositionReset", java.lang.Long.TYPE, java.lang.Boolean.TYPE)?.let { m ->
-                    hookMethod(m) { chain ->
-                        val res = chain.proceed()
-                        logInfo("SVAudioRendererV2.onPositionReset triggered reset")
-                        audioProcessor?.reset()
-                        res
-                    }
-                    logInfo("Successfully hooked SVAudioRendererV2.onPositionReset")
-                }
-
-                ReflectionUtils.findMethod(rendererClass, "render", java.lang.Long.TYPE, java.lang.Long.TYPE)?.let { m ->
-                    hookMethod(m) { chain ->
-                        val res = chain.proceed()
-                        val processor = audioProcessor
-                        if (processor?.needsBurst == true) {
-                            processor.maybeBurstDecode(chain.thisObject)
-                        }
-                        res
-                    }
-                    logInfo("Successfully hooked SVAudioRendererV2.render for burst decoding")
-                }
-            }
-        } catch (e: Throwable) {
-            logError("Failed to hook SVAudioRendererV2", e)
-        }
-
-        try {
-            val sinkClass = ReflectionUtils.findClass(
-                "com.google.android.exoplayer2.audio.DefaultAudioSink",
-                cl
-            )
-            if (sinkClass != null) {
-                sinkClass.declaredConstructors.forEach { ctor ->
-                    ctor.isAccessible = true
-                    hookMethod(ctor) { chain ->
-                        val res = chain.proceed()
-                        try {
-                            val sinkObj = chain.thisObject
-                            val toIntProcessors = ReflectionUtils.getObjectField(sinkObj, "toIntPcmAvailableAudioProcessors") as? Array<*>
-                            val vocalsProcessor = toIntProcessors?.firstOrNull { it != null && it.javaClass.name.contains("VocalsAudioProcessor") }
-                            if (vocalsProcessor != null) {
-                                val toFloatProcessors = ReflectionUtils.getObjectField(sinkObj, "toFloatPcmAvailableAudioProcessors") as? Array<*>
-                                val floatResampler = toFloatProcessors?.firstOrNull { it != null && it.javaClass.name.contains("FloatResamplingAudioProcessor") }
-                                val audioProcessorClass = ReflectionUtils.findClass("com.google.android.exoplayer2.audio.AudioProcessor", cl)
-                                if (audioProcessorClass != null) {
-                                    @Suppress("UNCHECKED_CAST")
-                                    val newToFloat = if (floatResampler != null) {
-                                        val arr = java.lang.reflect.Array.newInstance(audioProcessorClass, 2) as Array<Any>
-                                        arr[0] = floatResampler
-                                        arr[1] = vocalsProcessor
-                                        arr
-                                    } else {
-                                        val arr = java.lang.reflect.Array.newInstance(audioProcessorClass, 1) as Array<Any>
-                                        arr[0] = vocalsProcessor
-                                        arr
-                                    }
-                                    ReflectionUtils.setObjectField(sinkObj, "toFloatPcmAvailableAudioProcessors", newToFloat)
-                                    logInfo("Successfully patched DefaultAudioSink.toFloatPcmAvailableAudioProcessors with [FloatResampler, VocalsAudioProcessor]")
-                                }
-                            }
-                        } catch (t: Throwable) {
-                            logError("Error patching DefaultAudioSink toFloat processors", t)
-                        }
-                        res
-                    }
-                }
-                logInfo("Successfully hooked DefaultAudioSink constructors")
-            }
-        } catch (e: Throwable) {
-            logError("Failed to hook DefaultAudioSink constructors", e)
-        }
-
-        val processorClass = ReflectionUtils.findClass(
-            "com.apple.android.music.playback.processors.VocalsAudioProcessor",
-            cl
-        )
-        if (processorClass == null) {
-            logInfo("Could not find VocalsAudioProcessor")
-            return
-        }
-
-        try {
-            processorClass.declaredConstructors.forEach { ctor ->
-                ctor.isAccessible = true
-                hookMethod(ctor) { chain ->
-                    val res = chain.proceed()
-                    try {
-                        ReflectionUtils.setBooleanField(chain.thisObject, "FORCE_DISABLE", false)
-                        logInfo("Set VocalsAudioProcessor.FORCE_DISABLE = false")
-                    } catch (e: Throwable) {
-                        logError("Could not set FORCE_DISABLE", e)
-                    }
-                    res
-                }
-            }
-        } catch (t: Throwable) {
-            logError("Failed to hook VocalsAudioProcessor constructors", t)
-        }
-
-        try {
-            ReflectionUtils.findMethod(processorClass, "queueInput", ByteBuffer::class.java)?.let { m ->
-                hookMethod(m) { chain ->
-                    val processorObj = chain.thisObject
-                    val inputBuffer = chain.getArg(0) as ByteBuffer
-                    val processor = audioProcessor
-                    if (processor != null) {
-                        processor.processQueueInput(processorObj, inputBuffer)
-                    } else {
-                        SingAudioProcessor.passThrough(processorObj, inputBuffer)
-                    }
-                    null
-                }
-            }
-        } catch (t: Throwable) {
-            logError("Failed to hook queueInput", t)
-        }
-
-        try {
-            ReflectionUtils.findMethod(processorClass, "onFlush")?.let { m ->
-                hookMethod(m) { chain ->
-                    val res = chain.proceed()
-                    audioProcessor?.reset()
-                    res
-                }
-            }
-        } catch (t: Throwable) {
-            logError("Failed to hook onFlush", t)
-        }
-
-        try {
-            ReflectionUtils.findMethod(processorClass, "onQueueEndOfStream")?.let { m ->
-                hookMethod(m) { chain ->
-                    val res = chain.proceed()
-                    audioProcessor?.onEndOfStream()
-                    res
-                }
-            }
-        } catch (t: Throwable) {
-            logError("Failed to hook onQueueEndOfStream", t)
-        }
-
-        try {
-            ReflectionUtils.findMethod(processorClass, "getOutput")?.let { m ->
-                hookMethod(m) { chain ->
-                    val processor = audioProcessor
-                    if (processor != null && processor.isEnabled && chain.thisObject.javaClass.name.contains("VocalsAudioProcessor")) {
-                        val currentOutput = ReflectionUtils.getObjectField(chain.thisObject, "outputBuffer") as? ByteBuffer
-                        if (currentOutput == null || !currentOutput.hasRemaining()) {
-                            val drainBuf = processor.drainPendingOutput(chain.thisObject)
-                            if (drainBuf != null) {
-                                return@hookMethod chain.proceed()
-                            }
-                        }
-                    }
-                    chain.proceed()
-                }
-            }
-            logInfo("Successfully hooked VocalsAudioProcessor.getOutput for stream draining")
-        } catch (t: Throwable) {
-            logError("Failed to hook getOutput", t)
-        }
-
-        try {
-            ReflectionUtils.findMethod(processorClass, "isEnded")?.let { m ->
-                hookMethod(m) { chain ->
-                    val processor = audioProcessor
-                    if (processor != null && processor.isEnabled) {
-                        processor.isEnded()
-                    } else {
-                        chain.proceed()
-                    }
-                }
-            }
-        } catch (t: Throwable) {
-            logError("Failed to hook isEnded", t)
-        }
-
-        try {
-            ReflectionUtils.findMethod(processorClass, "setLevel", java.lang.Float.TYPE)?.let { m ->
-                hookMethod(m) { chain ->
-                    val rawLevel = chain.getArg(0) as Float
-                    audioProcessor?.vocalLevel = rawLevel
-                    logInfo("VocalsAudioProcessor.setLevel: $rawLevel")
-                    chain.proceed()
-                }
-            }
-        } catch (t: Throwable) {
-            logError("Failed to hook setLevel", t)
-        }
-
-        try {
-            ReflectionUtils.findMethod(processorClass, "setMode", java.lang.Integer.TYPE)?.let { m ->
-                hookMethod(m) { chain ->
-                    val mode = chain.getArg(0) as Int
-                    val enabled = (mode == 1)
-                    val processor = audioProcessor
-                    val wasSingActive = (processor?.isEnabled == true)
-                    if (processor != null) {
-                        processor.isEnabled = enabled
-                    }
-                    onSingModeChanged(enabled)
-                    logInfo("VocalsAudioProcessor.setMode: mode=$mode (enabled=$enabled)")
-                    chain.proceed()
-                }
-            }
-        } catch (t: Throwable) {
-            logError("Failed to hook setMode", t)
-        }
-
-        logInfo("Hooked VocalsAudioProcessor successfully")
-    }
-
-    /**
      * 4. Intercept user's slider changes from LocalMediaPlayerController.
      */
-    private fun hookPlaybackController(cl: ClassLoader) {
-        try {
-            val controllerClass = ReflectionUtils.findClass(
-                "com.apple.android.music.playback.controller.LocalMediaPlayerController",
-                cl
-            )
-            if (controllerClass != null) {
-                controllerClass.declaredConstructors.forEach { ctor ->
-                    ctor.isAccessible = true
-                    hookMethod(ctor) { chain ->
-                        val res = chain.proceed()
-                        currentLocalPlayerController = WeakReference(chain.thisObject)
-                        logInfo("Captured LocalMediaPlayerController instance from constructor")
-                        res
-                    }
-                }
-
-                ReflectionUtils.findMethod(controllerClass, "setVocalAttenuationLevel", java.lang.Float.TYPE)?.let { m ->
-                    hookMethod(m) { chain ->
-                        currentLocalPlayerController = WeakReference(chain.thisObject)
-                        val rawLevel = chain.getArg(0) as Float
-                        val level = if (org.francasio.sing.provider.SingSettings.allowZeroFloor) {
-                            if (rawLevel <= 0.005f || (defaultM0 != null && rawLevel <= defaultM0!! + 0.002f)) {
-                                0.0f
-                            } else if (rawLevel >= 0.995f) {
-                                1.0f
-                            } else {
-                                rawLevel.coerceIn(0.0f, 1.0f)
-                            }
-                        } else {
-                            rawLevel
-                        }
-                        audioProcessor?.vocalLevel = level
-                        currentVocalCtrl?.get()?.let { updateSliderIcon(it, rawLevel) }
-                        logInfo("Vocal level changed to: $level (raw: $rawLevel, allowZeroFloor=${org.francasio.sing.provider.SingSettings.allowZeroFloor})")
-                        chain.proceed(arrayOf(level))
-                    }
-                }
-
-                ReflectionUtils.findMethod(controllerClass, "setVocalAttenuationMode", java.lang.Integer.TYPE)?.let { m ->
-                    hookMethod(m) { chain ->
-                        val controller = chain.thisObject
-                        currentLocalPlayerController = WeakReference(controller)
-                        val mode = chain.getArg(0) as Int
-                        val enabled = (mode == 1)
-                        val processor = audioProcessor
-                        val wasSingActive = (processor?.isEnabled == true)
-
-                        val currentPos = if (wasSingActive && !enabled) {
-                            try {
-                                ReflectionUtils.callMethod(controller, "getCurrentPosition") as? Long ?: -1L
-                            } catch (_: Throwable) { -1L }
-                        } else -1L
-                        val cushionMs = if (wasSingActive && !enabled) {
-                            processor?.bufferedCushionMs ?: 0L
-                        } else 0L
-
-                        if (processor != null) {
-                            processor.isEnabled = enabled
-                        }
-                        onSingModeChanged(enabled)
-                        logInfo("LocalMediaPlayerController.setVocalAttenuationMode: mode=$mode (enabled=$enabled, wasSingActive=$wasSingActive, pos=$currentPos ms, cushion=$cushionMs ms)")
-
-                        val result = chain.proceed()
-
-                        if (wasSingActive && !enabled && currentPos >= 0L) {
-                            val delayMs = if (cushionMs > 0L) cushionMs - 240L else 10800L
-                            mainHandler.postDelayed({
-                                try {
-                                    val ctrl = currentLocalPlayerController?.get() ?: controller
-                                    val nowPos = try {
-                                        ReflectionUtils.callMethod(ctrl, "getCurrentPosition") as? Long ?: currentPos
-                                    } catch (_: Throwable) { currentPos }
-
-                                    val targetMs = if (nowPos >= currentPos + (delayMs / 2)) {
-                                        maxOf(0L, nowPos - delayMs)
-                                    } else {
-                                        maxOf(0L, currentPos - 300L)
-                                    }
-
-                                    logInfo("Sing disabled: nowPos=$nowPos ms, currentPos=$currentPos ms, delayMs=$delayMs ms -> targetMs=$targetMs ms")
-                                    ReflectionUtils.callMethod(ctrl, "seekToPosition", targetMs)
-                                    logInfo("Triggered controller.seekToPosition($targetMs ms) to restore sync on Sing disable")
-                                } catch (t: Throwable) {
-                                    logError("Failed to invoke seekToPosition after Sing disable", t)
-                                }
-                            }, 120L)
-                        }
-                        result
-                    }
-                }
-
-                logInfo("Hooked LocalMediaPlayerController slider listeners")
-            }
-        } catch (e: Throwable) {
-            logError("Failed to hook LocalMediaPlayerController", e)
+    private fun hookPlaybackController(cl: ClassLoader) =
+        vocalControlHooks.installPlaybackController(cl) { executable, hooker ->
+            hookMethod(executable, hooker = hooker)
         }
-    }
 
     /**
      * 5. Hook Lyrics UI and ViewModels:
@@ -1321,489 +852,6 @@ class SingXposedEntry : XposedModule() {
      *    - Dynamic microphone / ic_instrumental icon swapping on the slider
      *    - Long-press / mouse right-click on VocalAttenuationControl to launch Sing settings
      */
-    private fun isRightClick(event: MotionEvent): Boolean {
-        return (event.buttonState and MotionEvent.BUTTON_SECONDARY) != 0 ||
-            (event.actionMasked == MotionEvent.ACTION_BUTTON_PRESS && event.actionButton == MotionEvent.BUTTON_SECONDARY)
-    }
-
-    private fun launchMainActivity(context: Context, reason: String = "shortcut") {
-        val now = SystemClock.uptimeMillis()
-        if (now - lastSettingsLaunchTime < 500L) {
-            logInfo("Suppressed duplicate launchMainActivity ($reason, debounce)")
-            return
-        }
-        lastSettingsLaunchTime = now
-        lastLongPressTime = now
-        try {
-            val intent = Intent().apply {
-                component = ComponentName(
-                    "org.francasio.sing",
-                    "org.francasio.sing.ui.MainActivity"
-                )
-                flags = Intent.FLAG_ACTIVITY_NEW_TASK or
-                    Intent.FLAG_ACTIVITY_SINGLE_TOP or
-                    Intent.FLAG_ACTIVITY_CLEAR_TOP
-                putExtra("from_apple_music", true)
-            }
-            context.startActivity(intent)
-            logInfo("Launched Sing settings ($reason)")
-        } catch (t: Throwable) {
-            logError("Failed to launch Sing settings: ${t.message}")
-        }
-    }
-
-    private fun hookLyricsUI(cl: ClassLoader) {
-        try {
-            val y0Class = ReflectionUtils.findClass("com.apple.android.music.player.Y0", cl)
-            if (y0Class != null) {
-                y0Class.declaredConstructors.forEach { ctor ->
-                    ctor.isAccessible = true
-                    hookMethod(ctor) { chain ->
-                        val res = chain.proceed()
-                        val isReady = audioProcessor?.isEngineReady == true
-                        if (isReady && org.francasio.sing.provider.SingSettings.forceSongEligibility) {
-                            try {
-                                ReflectionUtils.setBooleanField(chain.thisObject, "b0", true)
-                                logInfo("Set Y0.b0 = true")
-                            } catch (_: Throwable) {}
-                        }
-                        res
-                    }
-                }
-            }
-        } catch (e: Throwable) {
-            logError("Failed to hook Y0 constructor", e)
-        }
-
-        try {
-            val lyricsFragClass = ReflectionUtils.findClass(
-                "com.apple.android.music.player.fragment.PlayerLyricsViewFragment",
-                cl
-            )
-            if (lyricsFragClass != null) {
-                ReflectionUtils.findMethod(lyricsFragClass, "D2", java.lang.Boolean.TYPE)?.let { m ->
-                    hookMethod(m) { chain ->
-                        currentLyricsFragment = WeakReference(chain.thisObject)
-                        val isReady = audioProcessor?.isEngineReady == true
-                        if (!isReady) {
-                            // Engine is still loading in background: keep Sing button strictly hidden
-                            return@hookMethod chain.proceed(arrayOf(false))
-                        }
-                        val origArg = chain.getArg(0) as Boolean
-                        if (origArg) {
-                            return@hookMethod chain.proceed(arrayOf(true))
-                        }
-                        if (org.francasio.sing.provider.SingSettings.forceSongEligibility) {
-                            val frag = chain.thisObject
-                            val songInfoPtr = try {
-                                ReflectionUtils.getObjectField(frag, "h1")
-                            } catch (_: Throwable) { null }
-                            if (songInfoPtr != null || audioProcessor != null) {
-                                return@hookMethod chain.proceed(arrayOf(true))
-                            }
-                        }
-                        chain.proceed(arrayOf(false))
-                    }
-                }
-
-                val onCreateView = ReflectionUtils.findMethod(
-                    lyricsFragClass,
-                    "onCreateView",
-                    LayoutInflater::class.java,
-                    ViewGroup::class.java,
-                    Bundle::class.java
-                )
-                if (onCreateView != null) {
-                    hookMethod(onCreateView) { chain ->
-                        currentLyricsFragment = WeakReference(chain.thisObject)
-                        val view = chain.proceed() as? View
-                        val frag = chain.thisObject
-                        try {
-                            for (field in frag.javaClass.declaredFields) {
-                                field.isAccessible = true
-                                val value = field.get(frag) ?: continue
-                                if (value is androidx.recyclerview.widget.RecyclerView.Adapter<*>) {
-                                    hookLyricsAdapter(value.javaClass)
-                                } else {
-                                    var cur: Class<*>? = value.javaClass
-                                    while (cur != null && cur != Any::class.java) {
-                                        if (cur.name.contains("Adapter")) {
-                                            hookLyricsAdapter(value.javaClass)
-                                            break
-                                        }
-                                        cur = cur.superclass
-                                    }
-                                }
-                            }
-                        } catch (_: Throwable) {}
-                        if (view != null) {
-                            currentLyricsView = WeakReference(view)
-                            view.post {
-                                try {
-                                    val rv = findLyricsRecyclerView(view)
-                                    logInfo("findLyricsRecyclerView in onCreateView: rv=$rv")
-                                    if (rv != null) {
-                                        hookLyricsRecyclerView(rv)
-                                    }
-                                } catch (t: Throwable) {
-                                    logInfo("Failed to resolve lyrics adapter from RecyclerView: ${t.message}")
-                                }
-                            }
-                            val vocalId = view.resources.getIdentifier("vocal_ctrl", "id", TARGET_PACKAGE)
-                            if (vocalId != 0) {
-                                val vocalCtrl = view.findViewById<View>(vocalId)
-                                if (vocalCtrl != null) {
-                                    currentVocalCtrl = WeakReference(vocalCtrl)
-                                    updateVocalAttenuationFloor(vocalCtrl.javaClass)
-                                    val isReady = audioProcessor?.isEngineReady == true
-                                    if (isReady && org.francasio.sing.provider.SingSettings.forceSongEligibility) {
-                                        vocalCtrl.visibility = View.VISIBLE
-                                        logInfo("Forced vocal_ctrl visibility to VISIBLE in onCreateView (engine ready)")
-                                    } else {
-                                        vocalCtrl.visibility = View.GONE
-                                        logInfo("Engine not ready: vocal_ctrl set to GONE in onCreateView")
-                                    }
-                                    updateSliderIcon(vocalCtrl)
-                                }
-                            }
-
-                            val badgeId = view.resources.getIdentifier("audio_badge_with_text", "id", TARGET_PACKAGE)
-                            val badge = if (badgeId != 0) view.findViewById<View>(badgeId) else null
-                            if (badge != null) {
-                                currentLosslessBadge = WeakReference(badge)
-                                val isSingActive = audioProcessor?.isEnabled == true
-                                if (isSingActive || isLosslessBadgeSuppressed) {
-                                    badge.animate()?.cancel()
-                                    badge.alpha = 0f
-                                    logInfo("Lossless badge alpha set to 0 in onCreateView (Sing is active or suppressed)")
-                                } else {
-                                    badge.alpha = 1f
-                                }
-                            }
-                        }
-                        view
-                    }
-                }
-
-                try {
-                    val vacDClass = ReflectionUtils.findClass(
-                        "com.apple.android.music.common.views.VocalAttenuationControl\$d",
-                        cl
-                    )
-                    if (vacDClass != null) {
-                        val h2 = ReflectionUtils.findMethod(lyricsFragClass, "h2", lyricsFragClass, vacDClass)
-                        if (h2 != null) {
-                            hookMethod(h2) { chain ->
-                                val res = chain.proceed()
-                                val frag = chain.getArg(0)
-                                val dVar = chain.getArg(1)
-                                val dName = dVar?.toString() ?: ""
-                                logInfo("PlayerLyricsViewFragment.h2 called with $dName")
-
-                                if (currentLosslessBadge?.get() == null && frag != null) {
-                                    try {
-                                        val n0 = ReflectionUtils.getObjectField(frag, "n0")
-                                        if (n0 != null) {
-                                            val k0 = ReflectionUtils.getObjectField(n0, "k0")
-                                            if (k0 != null) {
-                                                val j0 = ReflectionUtils.getObjectField(k0, "j0")
-                                                if (j0 != null) {
-                                                    val b0 = ReflectionUtils.getObjectField(j0, "b0") as? View
-                                                    if (b0 != null) {
-                                                        currentLosslessBadge = WeakReference(b0)
-                                                    }
-                                                }
-                                            }
-                                        }
-                                    } catch (_: Throwable) {}
-                                }
-
-                                if (dName == "ON") {
-                                    onSingModeChanged(true)
-                                } else if (dName == "OFF") {
-                                    onSingModeChanged(false)
-                                }
-                                res
-                            }
-                            logInfo("Hooked PlayerLyricsViewFragment.h2")
-                        }
-                    }
-                } catch (t: Throwable) {
-                    logError("Failed to hook PlayerLyricsViewFragment.h2", t)
-                }
-
-                logInfo("Hooked PlayerLyricsViewFragment (D2 + onCreateView + h2)")
-            }
-        } catch (e: Throwable) {
-            logError("Failed to hook PlayerLyricsViewFragment", e)
-        }
-
-        try {
-            val x2Class = ReflectionUtils.findClass("q8.X2", cl)
-            if (x2Class != null) {
-                val iMethod = ReflectionUtils.findMethod(x2Class, "I", View::class.java, java.lang.Integer.TYPE, java.lang.Boolean.TYPE)
-                if (iMethod != null) {
-                    hookMethod(iMethod) { chain ->
-                        val res = chain.proceed()
-                        val view = chain.getArg(0) as? View
-                        if (view != null) {
-                            val badge = getLosslessBadge()
-                            if (view === badge) {
-                                if (isLosslessBadgeSuppressed) {
-                                    view.animate()?.cancel()
-                                    view.alpha = 0f
-                                } else if (view.alpha != 1f) {
-                                    view.alpha = 1f
-                                }
-                            }
-                        }
-                        res
-                    }
-                    logInfo("Hooked q8.X2.I to guard Lossless badge opacity")
-                }
-            }
-        } catch (t: Throwable) {
-            logInfo("Note: q8.X2.I not hooked (${t.message})")
-        }
-
-        try {
-            val vacClass = ReflectionUtils.findClass(
-                "com.apple.android.music.common.views.VocalAttenuationControl",
-                cl
-            )
-            if (vacClass != null) {
-                cachedVacClass = vacClass
-                updateVocalAttenuationFloor(vacClass)
-
-                vacClass.declaredConstructors.forEach { ctor ->
-                    hookMethod(ctor) { chain ->
-                        val res = chain.proceed()
-                        (chain.thisObject as? View)?.let { vocalCtrl ->
-                            currentVocalCtrl = WeakReference(vocalCtrl)
-                            attachScrollWheelHandler(vocalCtrl)
-                        }
-                        updateVocalAttenuationFloor(vacClass)
-                        res
-                    }
-                }
-
-                ReflectionUtils.findMethod(vacClass, "setSliderFraction", java.lang.Float.TYPE)?.let { m ->
-                    hookMethod(m) { chain ->
-                        val fraction = chain.getArg(0) as Float
-                        val vocalCtrl = chain.thisObject as View
-                        currentVocalCtrl = WeakReference(vocalCtrl)
-                        val res = chain.proceed()
-                        updateSliderIcon(vocalCtrl, fraction)
-                        res
-                    }
-                }
-
-                try {
-                    val touchListenerClass = ReflectionUtils.findClass(
-                        "com.apple.android.music.common.views.VocalAttenuationControl\$e",
-                        cl
-                    )
-                    if (touchListenerClass != null) {
-                        val onTouch = ReflectionUtils.findMethod(touchListenerClass, "onTouch", View::class.java, MotionEvent::class.java)
-                        if (onTouch != null) {
-                            var isLongPressed = false
-                            var isRightClickActive = false
-                            var downX = 0f
-                            var downY = 0f
-                            var longPressRunnable: Runnable? = null
-
-                            hookMethod(onTouch) { chain ->
-                                val vocalCtrl = chain.getArg(0) as? View ?: return@hookMethod chain.proceed()
-                                attachScrollWheelHandler(vocalCtrl)
-                                val event = chain.getArg(1) as MotionEvent
-
-                                val rightClick = isRightClick(event)
-                                if (rightClick) {
-                                    when (event.actionMasked) {
-                                        MotionEvent.ACTION_DOWN, MotionEvent.ACTION_BUTTON_PRESS -> {
-                                            isRightClickActive = true
-                                            longPressRunnable?.let { mainHandler.removeCallbacks(it) }
-                                            longPressRunnable = null
-                                            isLongPressed = false
-                                            if (vocalCtrl.scaleX != 1.0f) vocalCtrl.scaleX = 1.0f
-                                            if (vocalCtrl.scaleY != 1.0f) vocalCtrl.scaleY = 1.0f
-                                            vocalCtrl.performHapticFeedback(HapticFeedbackConstants.CONTEXT_CLICK)
-                                            logInfo("Right click detected on VocalAttenuationControl -> launching Sing settings")
-                                            launchMainActivity(vocalCtrl.context, "mouse right click")
-                                            return@hookMethod true
-                                        }
-                                    }
-                                }
-
-                                if (isRightClickActive) {
-                                    when (event.actionMasked) {
-                                        MotionEvent.ACTION_MOVE -> return@hookMethod true
-                                        MotionEvent.ACTION_UP, MotionEvent.ACTION_BUTTON_RELEASE, MotionEvent.ACTION_CANCEL -> {
-                                            isRightClickActive = false
-                                            return@hookMethod true
-                                        }
-                                    }
-                                }
-
-                                val isSingOn = audioProcessor?.isEnabled == true || try {
-                                    val binding = ReflectionUtils.getObjectField(vocalCtrl, "e")
-                                    val c0 = ReflectionUtils.getObjectField(binding, "c0") as? View
-                                    c0?.isActivated == true
-                                } catch (_: Throwable) {
-                                    false
-                                } || try {
-                                    ReflectionUtils.getBooleanField(vocalCtrl, "l")
-                                } catch (_: Throwable) { false }
-
-                                if (isSingOn) {
-                                    longPressRunnable?.let { mainHandler.removeCallbacks(it) }
-                                    longPressRunnable = null
-                                    isLongPressed = false
-                                    if (vocalCtrl.scaleX != 1.0f) vocalCtrl.scaleX = 1.0f
-                                    if (vocalCtrl.scaleY != 1.0f) vocalCtrl.scaleY = 1.0f
-
-                                    // Guard 100% release if allowZeroFloor ("Remove slider limits") is enabled
-                                    if (org.francasio.sing.provider.SingSettings.allowZeroFloor &&
-                                        (event.actionMasked == MotionEvent.ACTION_UP || event.actionMasked == MotionEvent.ACTION_CANCEL)
-                                    ) {
-                                        val isDragging = try {
-                                            ReflectionUtils.getBooleanField(vocalCtrl, "l")
-                                        } catch (_: Throwable) { false }
-
-                                        if (isDragging) {
-                                            val currentFraction = getVocalSliderFraction(vocalCtrl)
-                                            if (currentFraction >= 0.99f) {
-                                                // Temporarily clamp H to 0.999f so Apple Music's onTouch takes the collapse branch (F0)
-                                                // instead of turning off Sing mode (K0).
-                                                setVocalSliderFractionField(vocalCtrl, 0.999f)
-                                                val res = chain.proceed()
-                                                // Restore sliderFraction to 1.0f (100%) and keep Sing mode ON
-                                                setVocalSliderFractionField(vocalCtrl, 1.0f)
-                                                audioProcessor?.vocalLevel = 1.0f
-                                                try {
-                                                    val lCallback = ReflectionUtils.getObjectField(vocalCtrl, "L")
-                                                    if (lCallback != null) {
-                                                        ReflectionUtils.callMethod(lCallback, "invoke", 1.0f)
-                                                    }
-                                                } catch (_: Throwable) {}
-                                                updateSliderIcon(vocalCtrl, 1.0f)
-                                                logInfo("Guarded Sing mode at 100% vocal level, collapsing slider while remaining ON")
-                                                return@hookMethod res
-                                            }
-                                        }
-                                    }
-
-                                    return@hookMethod chain.proceed()
-                                }
-
-                                when (event.actionMasked) {
-                                    MotionEvent.ACTION_DOWN -> {
-                                        isLongPressed = false
-                                        downX = event.x
-                                        downY = event.y
-                                        longPressRunnable?.let { mainHandler.removeCallbacks(it) }
-                                        if (vocalCtrl.scaleX != 1.0f) vocalCtrl.scaleX = 1.0f
-                                        if (vocalCtrl.scaleY != 1.0f) vocalCtrl.scaleY = 1.0f
-
-                                        val timeout = ViewConfiguration.getLongPressTimeout().toLong()
-                                        val runnable = Runnable {
-                                            val stillSingOff = !(audioProcessor?.isEnabled ?: false) && !try {
-                                                ReflectionUtils.getBooleanField(vocalCtrl, "l")
-                                            } catch (_: Throwable) { false }
-
-                                            if (stillSingOff) {
-                                                isLongPressed = true
-                                                vocalCtrl.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
-                                                launchMainActivity(vocalCtrl.context, "long press")
-                                            }
-                                        }
-                                        longPressRunnable = runnable
-                                        mainHandler.postDelayed(runnable, timeout)
-                                    }
-                                    MotionEvent.ACTION_MOVE -> {
-                                        val slop = ViewConfiguration.get(vocalCtrl.context).scaledTouchSlop
-                                        val dx = Math.abs(event.x - downX)
-                                        val dy = Math.abs(event.y - downY)
-                                        if (dx > slop || dy > slop) {
-                                            if (longPressRunnable != null) {
-                                                mainHandler.removeCallbacks(longPressRunnable!!)
-                                                longPressRunnable = null
-                                            }
-                                        }
-                                        if (isLongPressed) {
-                                            return@hookMethod true
-                                        }
-                                    }
-                                    MotionEvent.ACTION_UP -> {
-                                        if (longPressRunnable != null) {
-                                            mainHandler.removeCallbacks(longPressRunnable!!)
-                                            longPressRunnable = null
-                                        }
-                                        if (isLongPressed) {
-                                            isLongPressed = false
-                                            return@hookMethod true
-                                        }
-                                    }
-                                    MotionEvent.ACTION_CANCEL -> {
-                                        if (longPressRunnable != null) {
-                                            mainHandler.removeCallbacks(longPressRunnable!!)
-                                            longPressRunnable = null
-                                        }
-                                        isLongPressed = false
-                                    }
-                                }
-                                chain.proceed()
-                            }
-                        }
-                    }
-
-                    ReflectionUtils.findMethod(vacClass, "q", java.lang.Boolean.TYPE)?.let { m ->
-                        hookMethod(m) { chain ->
-                            val res = chain.proceed()
-                            val vocalCtrl = chain.thisObject as? View
-                            if (vocalCtrl != null) {
-                                currentVocalCtrl = WeakReference(vocalCtrl)
-                                updateSliderIcon(vocalCtrl)
-                            }
-                            res
-                        }
-                    }
-
-                    ReflectionUtils.findMethod(vacClass, "r", java.lang.Boolean.TYPE)?.let { m ->
-                        hookMethod(m) { chain ->
-                            if (SystemClock.uptimeMillis() - lastLongPressTime < 1000L) {
-                                logInfo("Suppressed VocalAttenuationControl.r after shortcut launch")
-                                null
-                            } else {
-                                val res = chain.proceed()
-                                val vocalCtrl = chain.thisObject as? View
-                                if (vocalCtrl != null) {
-                                    currentVocalCtrl = WeakReference(vocalCtrl)
-                                    updateSliderIcon(vocalCtrl)
-                                }
-                                res
-                            }
-                        }
-                    }
-
-                    logInfo("Hooked VocalAttenuationControl long-press / right-click settings launcher")
-                } catch (t: Throwable) {
-                    logError("Failed to hook VocalAttenuationControl long press", t)
-                }
-
-                logInfo("Hooked VocalAttenuationControl (zero floor, setSliderFraction)")
-            }
-        } catch (e: Throwable) {
-            logError("Failed to hook VocalAttenuationControl", e)
-        }
-
-        listOf("com.apple.android.music.player.x", "com.apple.android.music.player.y").forEach { name ->
-            try {
-                ReflectionUtils.findClass(name, cl)?.let { hookLyricsAdapter(it) }
-            } catch (_: Throwable) {}
-        }
-    }
-
     /**
      * Halts Apple Music crossfade while Sing is active.
      */
@@ -1906,917 +954,5 @@ class SingXposedEntry : XposedModule() {
         }
     }
 
-    private var isRecyclerViewHooked = false
-    private val hookedViews: MutableSet<View> = java.util.Collections.newSetFromMap(java.util.WeakHashMap<View, Boolean>())
-    private val hookedAdapters: MutableSet<String> = java.util.Collections.synchronizedSet(mutableSetOf<String>())
-    private val hookedGenericMotionClasses: MutableSet<Class<*>> = java.util.Collections.synchronizedSet(mutableSetOf())
-    private val hookedAutoScrollMethods: MutableSet<java.lang.reflect.Method> = java.util.Collections.synchronizedSet(mutableSetOf())
-    private val adapterActiveMethods = java.util.concurrent.ConcurrentHashMap<Class<*>, java.lang.reflect.Method>()
 
-    private class LyricsBlurState {
-        var adapter: Any? = null
-        var song: Any? = null
-        var manual = false
-        var lastFocused: Int? = null
-        var tapped: Int? = null
-        var downX = 0f
-        var downY = 0f
-        var moved = false
-        var updateScheduled = false
-    }
-    private val lyricsBlurStates = java.util.WeakHashMap<ViewGroup, LyricsBlurState>()
-    private fun blurState(rv: ViewGroup) = lyricsBlurStates.getOrPut(rv) { LyricsBlurState() }
-    private fun scheduleBlurUpdate(rv: ViewGroup) {
-        val state = blurState(rv)
-        if (state.updateScheduled) return
-        state.updateScheduled = true
-        rv.postOnAnimation {
-            state.updateScheduled = false
-            if (rv.isAttachedToWindow) updateLyricsBlur(rv)
-        }
-    }
-
-    private val currentBlurRadii = java.util.WeakHashMap<View, Float>()
-    private val targetBlurRadii = java.util.WeakHashMap<View, Float>()
-    private val blurAnimators = java.util.WeakHashMap<View, android.animation.ValueAnimator>()
-    private val blurEffects = mutableMapOf<Int, RenderEffect>()
-    private val boundBlurPositions = java.util.WeakHashMap<View, Int>()
-    private val blurInterpolator = android.view.animation.PathInterpolator(0.4f, 0f, 0.2f, 1f)
-
-    private fun renderBlur(view: View, radius: Float, scale: Float) {
-        // Still animate through at most 12 steps even when text on a phone is
-        // 3x larger; never clamp the *physical* radius back down to 12px.
-        val step = (radius / scale).roundToInt().coerceIn(0, 12)
-        // Quarter-pixel precision keeps the weaker 5-level blur proportional.
-        val effectKey = (step * scale * 4f).roundToInt()
-        val effectiveRadius = effectKey / 4f
-        val current = currentBlurRadii[view]
-        if (current == effectiveRadius) return
-        if (step == 0) {
-            // Keep zero as an explicit state. Removing it makes the next
-            // sharp -> blurred transition look like a first bind and snap.
-            currentBlurRadii[view] = 0f
-            if (current != null && current > 0f) view.setRenderEffect(null)
-        } else {
-            currentBlurRadii[view] = effectiveRadius
-            view.setRenderEffect(blurEffects.getOrPut(effectKey) {
-                RenderEffect.createBlurEffect(effectiveRadius, effectiveRadius, Shader.TileMode.CLAMP)
-            })
-        }
-    }
-
-    private fun setBlur(view: View, targetRadius: Float, scale: Float) {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) return
-        if (targetBlurRadii[view] == targetRadius) return
-        targetBlurRadii[view] = targetRadius
-        val previous = currentBlurRadii[view]
-        blurAnimators.remove(view)?.cancel()
-        if (previous == null || previous == targetRadius) {
-            renderBlur(view, targetRadius, scale)
-            return
-        }
-        val animator = android.animation.ValueAnimator.ofFloat(previous, targetRadius).apply {
-            duration = 250L
-            interpolator = blurInterpolator
-            addUpdateListener { renderBlur(view, it.animatedValue as Float, scale) }
-            addListener(object : android.animation.AnimatorListenerAdapter() {
-                override fun onAnimationEnd(animation: android.animation.Animator) {
-                    if (blurAnimators[view] !== animation) return
-                    blurAnimators.remove(view)
-                    renderBlur(view, targetRadius, scale)
-                }
-            })
-        }
-        blurAnimators[view] = animator
-        animator.start()
-    }
-
-    private fun resetViewBlur(view: View) {
-        blurAnimators.remove(view)?.cancel()
-        targetBlurRadii.remove(view)
-        if ((currentBlurRadii.remove(view) ?: 0f) > 0f && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            view.setRenderEffect(null)
-        }
-    }
-
-    private fun clearAllChildrenBlur(rv: ViewGroup, keepZeroState: Boolean = false) {
-        for (i in 0 until rv.childCount) {
-            val child = rv.getChildAt(i) ?: continue
-            resetViewBlur(child)
-            // A manual scroll must clear immediately, but the next automatic
-            // scroll should animate back from zero rather than snap on rebind.
-            if (keepZeroState) {
-                currentBlurRadii[child] = 0f
-                targetBlurRadii[child] = 0f
-            }
-        }
-    }
-
-    private fun beginManualScroll(rv: ViewGroup) {
-        val state = blurState(rv)
-        if (state.manual) return
-        state.manual = true
-        state.tapped = null
-        // Clear synchronously, before a scrolling frame can draw a stale last row.
-        clearAllChildrenBlur(rv, keepZeroState = true)
-    }
-
-    private fun resumeAutoScroll(rv: ViewGroup) {
-        blurState(rv).manual = false
-        scheduleBlurUpdate(rv)
-    }
-
-    private fun getActivePositions(adapter: Any?): Set<Int>? {
-        if (adapter == null) return null
-        try {
-            val adapterClass = adapter.javaClass
-            var method = adapterActiveMethods[adapterClass]
-            if (method == null) {
-                var cur: Class<*>? = adapterClass
-                while (cur != null && cur != Any::class.java) {
-                    for (m in cur.declaredMethods) {
-                        if (m.parameterTypes.isEmpty() && java.util.Set::class.java.isAssignableFrom(m.returnType)) {
-                            m.isAccessible = true
-                            adapterActiveMethods[adapterClass] = m
-                            method = m
-                            break
-                        }
-                    }
-                    if (method != null) break
-                    cur = cur.superclass
-                }
-            }
-            val set = method?.invoke(adapter) as? Set<*>
-            if (set != null) {
-                val result = mutableSetOf<Int>()
-                for (item in set) {
-                    if (item is Number) {
-                        result.add(item.toInt())
-                    }
-                }
-                return result
-            }
-        } catch (t: Throwable) {
-            logError("Failed to get active positions from adapter: ${t.message}", t)
-        }
-        return null
-    }
-
-    private var karaokeFlexId = 0
-    private var karaokeBgFlexId = 0
-    private var karaokeTranslationId = 0
-    private var karaokeBgTranslationId = 0
-    private var songLyricsLineId = 0
-    private var lyricsLineTextSizeId = 0
-    private var songLyricsLineContainerId = 0
-    private var writersCreditsLineId = 0
-    private var instrumentalRootId = 0
-    private var creditsBtnContainerId = 0
-    private var lyricsMainContentId = 0
-    private var staticLyricsLineId = 0
-
-    private fun resolveKaraokeResourceIds(res: android.content.res.Resources) {
-        if (karaokeFlexId == 0) {
-            karaokeFlexId = res.getIdentifier("karaoke_line_flexbox", "id", TARGET_PACKAGE)
-        }
-        if (karaokeBgFlexId == 0) {
-            karaokeBgFlexId = res.getIdentifier("bg_line_flexbox", "id", TARGET_PACKAGE)
-        }
-        if (karaokeTranslationId == 0) {
-            karaokeTranslationId = res.getIdentifier("lyrics_translation_line", "id", TARGET_PACKAGE)
-        }
-        if (karaokeBgTranslationId == 0) {
-            karaokeBgTranslationId = res.getIdentifier("lyrics_bg_translation_line", "id", TARGET_PACKAGE)
-        }
-        if (songLyricsLineId == 0) {
-            songLyricsLineId = res.getIdentifier("song_lyrics_line", "id", TARGET_PACKAGE)
-        }
-        if (lyricsLineTextSizeId == 0) {
-            lyricsLineTextSizeId = res.getIdentifier("lyrics_line_text_size", "dimen", TARGET_PACKAGE)
-        }
-        if (songLyricsLineContainerId == 0) {
-            songLyricsLineContainerId = res.getIdentifier("song_lyrics_line_container", "id", TARGET_PACKAGE)
-        }
-        if (writersCreditsLineId == 0) {
-            writersCreditsLineId = res.getIdentifier("writers_credits_line", "id", TARGET_PACKAGE)
-        }
-        if (instrumentalRootId == 0) {
-            instrumentalRootId = res.getIdentifier("lyrics_instrumental_root", "id", TARGET_PACKAGE)
-        }
-        if (creditsBtnContainerId == 0) {
-            creditsBtnContainerId = res.getIdentifier("credits_lyrics_button_container", "id", TARGET_PACKAGE)
-        }
-        if (lyricsMainContentId == 0) {
-            lyricsMainContentId = res.getIdentifier("lyrics_main_content", "id", TARGET_PACKAGE)
-        }
-        if (staticLyricsLineId == 0) {
-            staticLyricsLineId = res.getIdentifier("static_lyrics_line", "id", TARGET_PACKAGE)
-        }
-    }
-
-    private fun isStaticLyrics(rv: ViewGroup): Boolean {
-        try {
-            resolveKaraokeResourceIds(rv.resources)
-        } catch (_: Throwable) {}
-
-        val rvTag = rv.tag?.toString() ?: ""
-        if (rvTag.contains("static", ignoreCase = true)) return true
-
-        for (i in 0 until rv.childCount) {
-            val child = rv.getChildAt(i) ?: continue
-            val tag = child.tag?.toString() ?: ""
-            if (tag.contains("static", ignoreCase = true)) return true
-            if (isStaticRow(child)) return true
-        }
-        return false
-    }
-
-    private fun isStaticRow(view: View): Boolean {
-        val tag = view.tag?.toString()
-        // The static-song adapter renders the entire unsynchronized text as a
-        // single multiline song_lyrics_line TextView. Data binding may remove
-        // its layout tag, so the ID/tag checks alone cannot identify it.
-        if (view is TextView && view.id == songLyricsLineId &&
-            view.text?.contains('\n') == true) return true
-        if (tag?.contains("lyrics_line_static", ignoreCase = true) == true ||
-            tag?.contains("lyrics_body", ignoreCase = true) == true ||
-            (staticLyricsLineId != 0 && view.id == staticLyricsLineId)) return true
-        if (view is ViewGroup) {
-            for (i in 0 until view.childCount) {
-                if (isStaticRow(view.getChildAt(i))) return true
-            }
-        }
-        return false
-    }
-
-    private fun isInstrumentalRow(view: View): Boolean {
-        try {
-            resolveKaraokeResourceIds(view.resources)
-        } catch (_: Throwable) {}
-
-        val tagStr = view.tag?.toString() ?: ""
-        if (tagStr.contains("instrumental", ignoreCase = true)) return true
-        if (instrumentalRootId != 0 && (view.id == instrumentalRootId || view.findViewById<View>(instrumentalRootId) != null)) return true
-
-        if (view is ViewGroup) {
-            for (i in 0 until view.childCount) {
-                val c = view.getChildAt(i) ?: continue
-                val cName = try { view.resources.getResourceEntryName(c.id) } catch (_: Throwable) { "" }
-                if (cName.startsWith("dot")) {
-                    return true
-                }
-            }
-        }
-        return false
-    }
-
-    private fun isEligibleLyricsRow(view: View): Boolean {
-        if (isInstrumentalRow(view)) return false
-
-        try {
-            resolveKaraokeResourceIds(view.resources)
-        } catch (_: Throwable) {}
-
-        val tagStr = view.tag?.toString() ?: ""
-        if (isStaticRow(view) || tagStr.contains("static", ignoreCase = true) ||
-            tagStr.contains("credit", ignoreCase = true) ||
-            tagStr.contains("writer", ignoreCase = true)) {
-            return false
-        }
-        if (staticLyricsLineId != 0 && (view.id == staticLyricsLineId || view.findViewById<View>(staticLyricsLineId) != null)) return false
-        if (writersCreditsLineId != 0 && (view.id == writersCreditsLineId || view.findViewById<View>(writersCreditsLineId) != null)) return false
-        if (creditsBtnContainerId != 0 && (view.id == creditsBtnContainerId || view.findViewById<View>(creditsBtnContainerId) != null)) return false
-
-        if (view is ViewGroup) {
-            for (i in 0 until view.childCount) {
-                val c = view.getChildAt(i) ?: continue
-                val cName = try { view.resources.getResourceEntryName(c.id) } catch (_: Throwable) { "" }
-                if (cName.contains("credit") || cName.contains("writer")) {
-                    return false
-                }
-            }
-        }
-
-        if (songLyricsLineContainerId != 0 && view.id == songLyricsLineContainerId) return true
-        if (songLyricsLineId != 0 && view.findViewById<View>(songLyricsLineId) != null) return true
-        if (karaokeFlexId != 0 && view.findViewById<View>(karaokeFlexId) != null) return true
-        if (tagStr.contains("lyrics_line", ignoreCase = true)) return true
-
-        return false
-    }
-
-    private val rowPositionMethods = java.util.concurrent.ConcurrentHashMap<Class<*>, java.lang.reflect.Method>()
-    private fun rowPosition(rv: ViewGroup, child: View): Int = try {
-        // Apple Music's R8-renamed RecyclerView.M(View) is its public
-        // getChildAdapterPosition equivalent (it reads the attached holder).
-        val method = rowPositionMethods.getOrPut(rv.javaClass) {
-            try { rv.javaClass.getMethod("getChildAdapterPosition", View::class.java) }
-            catch (_: NoSuchMethodException) { rv.javaClass.getMethod("M", View::class.java) }
-        }
-        (method.invoke(if (java.lang.reflect.Modifier.isStatic(method.modifiers)) null else rv, child) as? Number)?.toInt() ?: -1
-    } catch (_: Throwable) { -1 }
-
-    private fun updateLyricsBlur(rv: ViewGroup) {
-        val blurEnabled = org.francasio.sing.provider.SingSettings.blurUnfocusedLyrics
-        val state = blurState(rv)
-        val adapter = try { ReflectionUtils.callMethod(rv, "getAdapter") } catch (_: Throwable) { null }
-        // Apple Music's static-lyrics adapter binds an initially empty TextView
-        // and fills it *after* the row is attached. Row-text checks alone miss it.
-        val staticAdapter = adapter?.javaClass?.name == "com.apple.android.music.player.I"
-        if (!blurEnabled || staticAdapter || isStaticLyrics(rv)) {
-            clearAllChildrenBlur(rv)
-            return
-        }
-        if (state.manual) {
-            clearAllChildrenBlur(rv, keepZeroState = true)
-            return
-        }
-
-        if (adapter == null) return
-        if (state.adapter !== adapter) {
-            state.adapter = adapter
-            state.song = null
-            state.lastFocused = null
-            state.tapped = null
-        }
-        // The adapter is reused between tracks. Do not carry a previous track's
-        // last focused line into the next track's instrumental intro.
-        val song = try { resolveAdapterFields(adapter.javaClass).songInfo?.get(adapter) } catch (_: Throwable) { null }
-        if (song != null && state.song !== song) {
-            state.song = song
-            state.lastFocused = null
-            state.tapped = null
-        }
-        val activePositions = getActivePositions(adapter) ?: emptySet()
-        val rows = mutableListOf<Int>()
-        val visible = mutableSetOf<Int>()
-        val attached = mutableListOf<Pair<View, Int>>()
-        var dots: Int? = null
-        val rvHeight = rv.height
-        for (i in 0 until rv.childCount) {
-            val child = rv.getChildAt(i) ?: continue
-            val pos = rowPosition(rv, child)
-            if (pos < 0) continue
-            attached.add(child to pos)
-            if (isInstrumentalRow(child)) dots = pos
-            if (isEligibleLyricsRow(child)) {
-                rows.add(pos)
-                if (rvHeight > 0 && child.bottom > 0 && child.top < rvHeight) visible.add(pos)
-            }
-        }
-        // No eligible synchronized lines means static/credits/empty content.
-        if (rows.isEmpty()) {
-            clearAllChildrenBlur(rv); return
-        }
-        val focusedLyrics = activePositions.filterTo(mutableSetOf()) { it != dots }
-        if (state.tapped != null && state.tapped in focusedLyrics) state.tapped = null
-        if (focusedLyrics.isNotEmpty()) state.lastFocused = focusedLyrics.maxOrNull()
-        val reference = state.tapped ?: state.lastFocused ?: (rows.minOrNull()!! - 1)
-        val instrumentalBreak = state.tapped == null && dots != null && dots >= reference &&
-            (dots in activePositions || focusedLyrics.isEmpty())
-        val targets = LyricsBlurCascade.radii(rows, visible,
-            if (instrumentalBreak) emptySet() else focusedLyrics,
-            reference, if (instrumentalBreak) dots else null,
-            blurPreviousReference = instrumentalBreak && state.lastFocused != null)
-        val eligible = rows.toHashSet()
-        val textSizePx = if (lyricsLineTextSizeId != 0) {
-            try { rv.resources.getDimension(lyricsLineTextSizeId) }
-            catch (_: Throwable) { 32f }
-        } else 32f
-        val blurScale = LyricsBlurCascade.scaleForTextSize(textSizePx)
-        for ((child, pos) in attached) {
-            if (pos in eligible) {
-                // A lyric can leave the viewport during Apple's auto-scroll.
-                // Retarget it to zero instead of resetting its animator mid-fade.
-                setBlur(child, (targets[pos] ?: 0f) * blurScale, blurScale)
-            } else {
-                resetViewBlur(child)
-            }
-        }
-    }
-
-    private data class AdapterFields(
-        val ttml: java.lang.reflect.Field?,
-        val songInfo: java.lang.reflect.Field?,
-        val sparseArray: java.lang.reflect.Field?
-    )
-    private val adapterFields = java.util.concurrent.ConcurrentHashMap<Class<*>, AdapterFields>()
-
-    private fun findLyricsRecyclerView(v: View): View? {
-        if (lyricsMainContentId == 0) {
-            try {
-                lyricsMainContentId = v.resources.getIdentifier("lyrics_main_content", "id", TARGET_PACKAGE)
-            } catch (_: Throwable) {}
-        }
-        if (lyricsMainContentId != 0) {
-            val found = v.findViewById<View>(lyricsMainContentId)
-            if (found != null) return found
-        }
-        if (v.javaClass.name.contains("RecyclerView") || v.javaClass.superclass?.name?.contains("RecyclerView") == true) return v
-        if (v is ViewGroup) {
-            for (i in 0 until v.childCount) {
-                val found = findLyricsRecyclerView(v.getChildAt(i))
-                if (found != null) return found
-            }
-        }
-        return null
-    }
-
-    private fun hookLyricsRecyclerView(rv: View) {
-        logInfo("hookLyricsRecyclerView called: rv=${rv.javaClass.name}, id=${rv.id}")
-        if (rv !is ViewGroup) return
-
-        if (lyricsMainContentId == 0) {
-            try {
-                lyricsMainContentId = rv.resources.getIdentifier("lyrics_main_content", "id", TARGET_PACKAGE)
-            } catch (_: Throwable) {}
-        }
-        if (lyricsMainContentId != 0 && rv.id != lyricsMainContentId) {
-            logInfo("Ignoring non-lyrics RecyclerView: id=${rv.id}, target=$lyricsMainContentId")
-            return
-        }
-
-        lyricsRecyclerView = WeakReference(rv)
-        val currentAdapter = ReflectionUtils.callMethod(rv, "getAdapter")
-        if (currentAdapter != null) {
-            hookLyricsAdapter(currentAdapter.javaClass)
-        }
-
-        if (!hookedViews.add(rv)) return
-
-        // The host's RecyclerView is loaded in a different class loader. An
-        // interface proxy can subscribe without casting it to our own copy.
-        try {
-            val addListener = rv.javaClass.methods.first { method ->
-                method.parameterTypes.size == 1 && method.returnType == java.lang.Void.TYPE &&
-                    method.parameterTypes[0].isInterface && method.parameterTypes[0].methods.any { callback ->
-                        callback.returnType == java.lang.Boolean.TYPE &&
-                            callback.parameterTypes.any { it == MotionEvent::class.java }
-                    }
-            }
-            val listenerType = addListener.parameterTypes[0]
-            val touchSlop = ViewConfiguration.get(rv.context).scaledTouchSlop
-            val listener = java.lang.reflect.Proxy.newProxyInstance(rv.javaClass.classLoader, arrayOf(listenerType)) { _, method, args ->
-                if (method.returnType == java.lang.Boolean.TYPE &&
-                    method.parameterTypes.any { it == MotionEvent::class.java }) {
-                    val event = args?.getOrNull(1) as? MotionEvent
-                    if (event != null) {
-                        val state = blurState(rv)
-                        when (event.actionMasked) {
-                            MotionEvent.ACTION_DOWN -> {
-                                state.downX = event.x; state.downY = event.y; state.moved = false
-                            }
-                            MotionEvent.ACTION_MOVE -> {
-                                if (!state.moved && (kotlin.math.abs(event.x - state.downX) > touchSlop ||
-                                        kotlin.math.abs(event.y - state.downY) > touchSlop)) {
-                                    state.moved = true
-                                    beginManualScroll(rv)
-                                }
-                            }
-                            MotionEvent.ACTION_UP -> {
-                                if (!state.moved) {
-                                    val child = try {
-                                        (ReflectionUtils.callMethod(rv, "findChildViewUnder", event.x, event.y)
-                                            ?: ReflectionUtils.callMethod(rv, "E", event.x, event.y)) as? View
-                                    } catch (_: Throwable) {
-                                        try { ReflectionUtils.callMethod(rv, "E", event.x, event.y) as? View }
-                                        catch (_: Throwable) { null }
-                                    }
-                                    if (child != null && isEligibleLyricsRow(child)) {
-                                        val pos = rowPosition(rv, child)
-                                        if (pos >= 0) {
-                                            state.tapped = pos; state.manual = false
-                                            updateLyricsBlur(rv)
-                                        }
-                                    }
-                                }
-                            }
-                            MotionEvent.ACTION_CANCEL -> state.moved = false
-                        }
-                    }
-                }
-                if (method.returnType == java.lang.Boolean.TYPE) false else null
-            }
-            addListener.invoke(rv, listener)
-        } catch (t: Throwable) { logError("Failed to attach lyrics touch listener", t) }
-
-        // Generic motion (wheel) bypasses touch listeners. Hook once per host
-        // RecyclerView class, without replacing its own listeners.
-        if (hookedGenericMotionClasses.add(rv.javaClass)) {
-            try {
-                hookMethod(rv.javaClass.getMethod("onGenericMotionEvent", MotionEvent::class.java)) { chain ->
-                    val target = chain.thisObject as? ViewGroup
-                    val event = chain.getArg(0) as? MotionEvent
-                    if (target != null && target in hookedViews && event?.actionMasked == MotionEvent.ACTION_SCROLL &&
-                        (event.getAxisValue(MotionEvent.AXIS_VSCROLL) != 0f ||
-                            event.getAxisValue(MotionEvent.AXIS_HSCROLL) != 0f)) beginManualScroll(target)
-                    chain.proceed()
-                }
-            } catch (t: Throwable) { logError("Failed to hook lyrics mouse wheel", t) }
-            try {
-                // SCROLL_STATE_DRAGGING can also be entered by Apple Music's
-                // introductory auto-scroll. Only actual touch/wheel input may
-                // suppress blur; those are handled above.
-                ReflectionUtils.findMethod(rv.javaClass, "onScrolled", java.lang.Integer.TYPE, java.lang.Integer.TYPE)?.let { m ->
-                    hookMethod(m) { chain ->
-                        val result = chain.proceed()
-                        val target = chain.thisObject as? ViewGroup
-                        if (target != null && target in hookedViews) scheduleBlurUpdate(target)
-                        result
-                    }
-                }
-            } catch (t: Throwable) { logError("Failed to hook lyrics scroll state", t) }
-        }
-
-        val scrollMethodNames = listOf("smoothScrollToPosition", "scrollToPosition", "smoothScrollBy")
-        for (name in scrollMethodNames) {
-            rv.javaClass.methods.filter { it.name == name }.forEach { m ->
-                hookMethod(m) { chain ->
-                    val res = chain.proceed()
-                    resumeAutoScroll(rv)
-                    res
-                }
-            }
-        }
-
-        try {
-            val lm = ReflectionUtils.callMethod(rv, "getLayoutManager")
-            if (lm != null) {
-                hookLayoutManager(lm, rv)
-            }
-            val setLayoutManagerMethod = rv.javaClass.methods.firstOrNull {
-                it.name == "setLayoutManager" && it.parameterTypes.size == 1
-            }
-            if (setLayoutManagerMethod != null) {
-                hookMethod(setLayoutManagerMethod) { chain ->
-                    val newLm = chain.getArg(0)
-                    if (newLm != null) {
-                        hookLayoutManager(newLm, rv)
-                    }
-                    chain.proceed()
-                }
-            }
-        } catch (_: Throwable) {}
-
-        try {
-            val setAdapterMethod = rv.javaClass.methods.firstOrNull { m ->
-                m.name == "setAdapter" && m.parameterTypes.size == 1 &&
-                    (m.parameterTypes[0].name.contains("Adapter") || m.parameterTypes[0] == Any::class.java)
-            }
-            if (setAdapterMethod != null) {
-                hookMethod(setAdapterMethod) { chain ->
-                    val newAdapter = chain.getArg(0)
-                    if (newAdapter != null) {
-                        hookLyricsAdapter(newAdapter.javaClass)
-                    }
-                    val res = chain.proceed()
-                    scheduleBlurUpdate(rv)
-                    res
-                }
-            }
-        } catch (t: Throwable) {
-            logError("Failed to hook RecyclerView.setAdapter: ${t.message}", t)
-        }
-
-        scheduleBlurUpdate(rv)
-    }
-
-    private fun hookLayoutManager(lm: Any, rv: ViewGroup) {
-        val lmScrollMethods = listOf("smoothScrollToPosition", "scrollToPosition", "scrollToPositionWithOffset", "startSmoothScroll")
-        var cur: Class<*>? = lm.javaClass
-        while (cur != null && cur != Any::class.java) {
-            for (m in cur.declaredMethods) {
-                if (java.lang.reflect.Modifier.isAbstract(m.modifiers)) continue
-                // Apple Music's bundled, minified LinearLayoutManager uses u1
-                // for scrollToPositionWithOffset. This is the call made by
-                // PlayerLyricsViewFragment.K.b when it actually auto-scrolls,
-                // including when the introductory three dots become active.
-                if (m.name == "u1" && m.parameterTypes.contentEquals(arrayOf(java.lang.Integer.TYPE, java.lang.Integer.TYPE)) &&
-                    hookedAutoScrollMethods.add(m)) {
-                    hookMethod(m) { chain ->
-                        val res = chain.proceed()
-                        val currentRv = lyricsRecyclerView?.get()
-                        if (currentRv != null &&
-                            ReflectionUtils.callMethod(currentRv, "getLayoutManager") === chain.thisObject) {
-                            resumeAutoScroll(currentRv)
-                        }
-                        res
-                    }
-                }
-                if (m.name in lmScrollMethods) {
-                    hookMethod(m) { chain ->
-                        val res = chain.proceed()
-                        resumeAutoScroll(rv)
-                        res
-                    }
-                }
-            }
-            cur = cur.superclass
-        }
-    }
-
-    private fun hookLyricsAdapter(adapterClass: Class<*>) {
-        if (!hookedAdapters.add(adapterClass.name)) return
-        logInfo("hookLyricsAdapter: successfully registered ${adapterClass.name}")
-
-        // 1. Hook onBindViewHolder (blur and group centering)
-        val bindMethods = adapterClass.declaredMethods.filter { m ->
-            !java.lang.reflect.Modifier.isAbstract(m.modifiers) &&
-                m.parameterTypes.size == 2 &&
-                m.parameterTypes[1] == java.lang.Integer.TYPE &&
-                (m.name == "k" || m.name == "onBindViewHolder" || m.returnType == java.lang.Void.TYPE)
-        }
-        for (m in bindMethods) {
-            hookMethod(m) { chain ->
-                val res = chain.proceed()
-                try {
-                    val adapter = chain.thisObject
-                    val holder = chain.getArg(0) ?: return@hookMethod res
-                    val position = chain.getArg(1) as? Int ?: return@hookMethod res
-
-                    val itemView = (ReflectionUtils.getObjectField(holder, "itemView")
-                        ?: ReflectionUtils.getObjectField(holder, "a")) as? View ?: return@hookMethod res
-
-                    // The holder may have been a blurred synchronized line before
-                    // being rebound as static lyrics or an instrumental row.
-                    if (boundBlurPositions.put(itemView, position) != position || !isEligibleLyricsRow(itemView)) {
-                        resetViewBlur(itemView)
-                    }
-                    lyricsRecyclerView?.get()?.let { scheduleBlurUpdate(it) }
-
-                    // --- Group lyrics centering (word-by-word only) ---
-                    if (org.francasio.sing.provider.SingSettings.centerGroupLyrics && itemView is ViewGroup) {
-                        resolveKaraokeResourceIds(itemView.resources)
-                        val flexboxes = mutableListOf<View>()
-                        if (karaokeFlexId != 0) {
-                            itemView.findViewById<View>(karaokeFlexId)?.let { flexboxes.add(it) }
-                        }
-                        if (karaokeBgFlexId != 0) {
-                            itemView.findViewById<View>(karaokeBgFlexId)?.let { flexboxes.add(it) }
-                        }
-                        if (flexboxes.isEmpty()) {
-                            findFlexboxViews(itemView, flexboxes)
-                        }
-
-                        // Only process word-synced karaoke lines containing flexboxes
-                        if (flexboxes.isNotEmpty() && isLineGroupAgent(adapter, position)) {
-                            for (flex in flexboxes) {
-                                centerFlexboxView(flex)
-                            }
-                            centerKaraokeRow(itemView)
-                        } else {
-                            stopCenteringKaraokeRow(itemView)
-                        }
-                    } else {
-                        stopCenteringKaraokeRow(itemView)
-                    }
-                } catch (t: Throwable) {
-                    logError("Failed to process lyrics row bind: ${t.message}", t)
-                }
-                res
-            }
-        }
-
-        // 2. Hook line-advance method O(List, int, Array). Q(boolean)
-        // toggles an unrelated lyrics UI flag, not the host's auto-scroll.
-        var cur: Class<*>? = adapterClass
-        while (cur != null && cur != Any::class.java) {
-            for (m in cur.declaredMethods) {
-                if (java.lang.reflect.Modifier.isAbstract(m.modifiers)) continue
-
-                if (m.parameterTypes.size == 3 &&
-                    java.util.List::class.java.isAssignableFrom(m.parameterTypes[0]) &&
-                    m.parameterTypes[1] == java.lang.Integer.TYPE &&
-                    m.parameterTypes[2].isArray) {
-                    hookMethod(m) { chain ->
-                        val res = chain.proceed()
-                        lyricsRecyclerView?.get()?.let { rv ->
-                            scheduleBlurUpdate(rv)
-                        }
-                        res
-                    }
-                }
-            }
-            cur = cur.superclass
-        }
-
-        // 3. Hook onViewRecycled / onViewDetachedFromWindow (clear blur on views leaving window to save battery)
-        val detachMethods = adapterClass.methods.filter {
-            it.name == "onViewRecycled" || it.name == "onViewDetachedFromWindow"
-        }
-        for (m in detachMethods) {
-            hookMethod(m) { chain ->
-                val holder = chain.getArg(0)
-                if (holder != null) {
-                    val itemView = (ReflectionUtils.getObjectField(holder, "itemView")
-                        ?: ReflectionUtils.getObjectField(holder, "a")) as? View
-                    if (itemView != null) {
-                        boundBlurPositions.remove(itemView)
-                        resetViewBlur(itemView)
-                        if (m.name == "onViewRecycled") stopCenteringKaraokeRow(itemView)
-                    }
-                }
-                chain.proceed()
-            }
-        }
-
-        // 4. Hook onAttachedToRecyclerView
-        val attachMethods = adapterClass.methods.filter {
-            it.name == "onAttachedToRecyclerView" ||
-            (it.parameterTypes.size == 1 && it.parameterTypes[0].name.contains("RecyclerView"))
-        }
-        for (m in attachMethods) {
-            hookMethod(m) { chain ->
-                val rv = chain.getArg(0) as? ViewGroup
-                if (rv != null) {
-                    if (lyricsMainContentId == 0) {
-                        try {
-                            lyricsMainContentId = rv.resources.getIdentifier("lyrics_main_content", "id", TARGET_PACKAGE)
-                        } catch (_: Throwable) {}
-                    }
-                    if (lyricsMainContentId == 0 || rv.id == lyricsMainContentId) {
-                        lyricsRecyclerView = WeakReference(rv)
-                        hookLyricsRecyclerView(rv)
-                    }
-                }
-                chain.proceed()
-            }
-        }
-    }
-
-    private fun resolveAdapterFields(adapterClass: Class<*>): AdapterFields = adapterFields.getOrPut(adapterClass) {
-        var ttml: java.lang.reflect.Field? = null
-        var songInfo: java.lang.reflect.Field? = null
-        var sparseArray: java.lang.reflect.Field? = null
-        var cur: Class<*>? = adapterClass
-        while (cur != null && cur != Any::class.java) {
-            for (f in cur.declaredFields) {
-                val typeName = f.type.name
-                if (sparseArray == null && android.util.SparseArray::class.java.isAssignableFrom(f.type)) {
-                    sparseArray = f.apply { isAccessible = true }
-                } else if (songInfo == null && typeName.contains("SongInfoPtr")) {
-                    songInfo = f.apply { isAccessible = true }
-                } else if (ttml == null && typeName.contains("com.apple.android.music.ttml")) {
-                    ttml = f.apply { isAccessible = true }
-                }
-            }
-            cur = cur.superclass
-        }
-        AdapterFields(ttml, songInfo, sparseArray)
-    }
-
-    private fun isLineGroupAgent(adapter: Any, position: Int): Boolean {
-        try {
-            val fields = resolveAdapterFields(adapter.javaClass)
-            val ttmlData = fields.ttml?.get(adapter)
-                ?: ReflectionUtils.callMethod(adapter, "x")
-                ?: ReflectionUtils.getObjectField(adapter, "p")
-            if (ttmlData != null) {
-                val linePtr = ReflectionUtils.callMethod(ttmlData, "a", position)
-                if (linePtr != null) {
-                    val lineNative = ReflectionUtils.callMethod(linePtr, "get")
-                    if (lineNative != null) {
-                        val agentId = ReflectionUtils.callMethod(lineNative, "getAgent") as? String
-                        val lineId = ReflectionUtils.callMethod(lineNative, "getLineId") as? Int ?: -1
-
-                        var d0Type: String? = null
-                        var d0Align: Int? = null
-                        val d0 = (fields.sparseArray?.get(adapter)
-                            ?: ReflectionUtils.getObjectField(adapter, "d0")) as? android.util.SparseArray<*>
-                        if (d0 != null && lineId >= 0) {
-                            val itemInfo = d0.get(lineId)
-                            if (itemInfo != null) {
-                                for (f in itemInfo.javaClass.declaredFields) {
-                                    f.isAccessible = true
-                                    if (f.type.isEnum) {
-                                        d0Type = f.get(itemInfo)?.toString()
-                                    } else if (f.type == java.lang.Integer.TYPE && d0Align == null) {
-                                        d0Align = f.getInt(itemInfo)
-                                    }
-                                }
-                            }
-                        }
-
-                        var songInfoType: String? = null
-                        val songInfoPtr = fields.songInfo?.get(adapter)
-                            ?: ReflectionUtils.callMethod(adapter, "y")
-                            ?: ReflectionUtils.getObjectField(adapter, "o")
-                        if (songInfoPtr != null && !agentId.isNullOrEmpty()) {
-                            val songInfoNative = ReflectionUtils.callMethod(songInfoPtr, "get")
-                            if (songInfoNative != null) {
-                                val agentPtr = ReflectionUtils.callMethod(songInfoNative, "getAgent", agentId)
-                                if (agentPtr != null) {
-                                    val agentNative = ReflectionUtils.callMethod(agentPtr, "get")
-                                    if (agentNative != null) {
-                                        songInfoType = ReflectionUtils.callMethod(agentNative, "getType")?.toString()
-                                    }
-                                }
-                            }
-                        }
-
-                        val isGroup = agentId == "v1000" ||
-                            songInfoType.equals("Group", ignoreCase = true) ||
-                            d0Type.equals("Group", ignoreCase = true) ||
-                            d0Align == 1
-
-                        return isGroup
-                    }
-                }
-            }
-        } catch (t: Throwable) {
-            logError("isLineGroupAgent error at pos $position: ${t.message}", t)
-        }
-        return false
-    }
-
-    private data class KaraokeCenterListeners(
-        val preDraw: android.view.ViewTreeObserver.OnPreDrawListener,
-        val attach: View.OnAttachStateChangeListener
-    )
-    private val centeredKaraokeRows = java.util.WeakHashMap<View, KaraokeCenterListeners>()
-    private val originalKaraokeTranslationGravities = java.util.WeakHashMap<TextView, Int>()
-
-    private fun centerKaraokeRow(row: ViewGroup) {
-        // Apple Music scales the *outer* ConstraintLayout, and sets its pivot
-        // back to the left/right edge when a line gains focus. Correct it just
-        // before drawing so that both focus and layout changes stay centered.
-        if (centeredKaraokeRows[row] == null) {
-            val rowRef = WeakReference(row)
-            val listener = android.view.ViewTreeObserver.OnPreDrawListener {
-                val view = rowRef.get() ?: return@OnPreDrawListener true
-                val center = view.width / 2f
-                if (view.pivotX != center) view.pivotX = center
-                centerKaraokeTranslations(view)
-                true
-            }
-            val attach = object : View.OnAttachStateChangeListener {
-                override fun onViewAttachedToWindow(view: View) {
-                    view.viewTreeObserver.addOnPreDrawListener(listener)
-                }
-                override fun onViewDetachedFromWindow(view: View) {
-                    view.viewTreeObserver.takeIf { it.isAlive }?.removeOnPreDrawListener(listener)
-                }
-            }
-            centeredKaraokeRows[row] = KaraokeCenterListeners(listener, attach)
-            row.addOnAttachStateChangeListener(attach)
-            if (row.isAttachedToWindow) row.viewTreeObserver.addOnPreDrawListener(listener)
-        }
-        row.pivotX = row.width / 2f
-        centerKaraokeTranslations(row)
-    }
-
-    private fun stopCenteringKaraokeRow(row: View) {
-        val listeners = centeredKaraokeRows.remove(row) ?: return
-        row.viewTreeObserver.takeIf { it.isAlive }?.removeOnPreDrawListener(listeners.preDraw)
-        row.removeOnAttachStateChangeListener(listeners.attach)
-        if (row is ViewGroup) {
-            for (id in intArrayOf(karaokeTranslationId, karaokeBgTranslationId)) {
-                if (id == 0) continue
-                val text = row.findViewById<TextView>(id) ?: continue
-                originalKaraokeTranslationGravities.remove(text)?.let { text.gravity = it }
-            }
-        }
-    }
-
-    private fun centerKaraokeTranslations(row: ViewGroup) {
-        for (id in intArrayOf(karaokeTranslationId, karaokeBgTranslationId)) {
-            if (id == 0) continue
-            val text = row.findViewById<TextView>(id) ?: continue
-            if (!originalKaraokeTranslationGravities.containsKey(text)) {
-                originalKaraokeTranslationGravities[text] = text.gravity
-            }
-            val gravity = (text.gravity and android.view.Gravity.RELATIVE_HORIZONTAL_GRAVITY_MASK.inv()) or
-                android.view.Gravity.CENTER_HORIZONTAL
-            if (text.gravity != gravity) text.gravity = gravity
-        }
-    }
-
-    private fun centerFlexboxView(view: View) {
-        try {
-            ReflectionUtils.callMethod(view, "setJustifyContent", 2)
-        } catch (_: Throwable) {}
-
-        val lp = view.layoutParams
-        if (lp != null) {
-            try {
-                val biasField = ReflectionUtils.findField(lp.javaClass, "horizontalBias")
-                    ?: ReflectionUtils.findField(lp.javaClass, "E")
-                    ?: lp.javaClass.fields.firstOrNull { it.name == "horizontalBias" || (it.type == java.lang.Float.TYPE && it.modifiers and java.lang.reflect.Modifier.STATIC == 0) }
-                biasField?.set(lp, 0.5f)
-                view.layoutParams = lp
-                view.requestLayout()
-            } catch (_: Throwable) {}
-        }
-    }
-
-    private fun findFlexboxViews(viewGroup: ViewGroup, out: MutableList<View>) {
-        for (i in 0 until viewGroup.childCount) {
-            val child = viewGroup.getChildAt(i) ?: continue
-            if (child.javaClass.name.contains("FlexboxLayout")) {
-                out.add(child)
-            } else if (child is ViewGroup) {
-                findFlexboxViews(child, out)
-            }
-        }
-    }
 }

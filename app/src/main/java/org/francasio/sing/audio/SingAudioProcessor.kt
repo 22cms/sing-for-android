@@ -17,7 +17,9 @@ import java.util.concurrent.Executors
  */
 class SingAudioProcessor(
     private val context: Context,
-    private val moduleApkPath: String
+    private val moduleApkPath: String,
+    private val managerInfo: String? = null,
+    private val onSettingsChanged: () -> Unit = {}
 ) {
     companion object {
         private const val TAG = "AppleSing_Processor"
@@ -168,7 +170,6 @@ class SingAudioProcessor(
     }
 
     init {
-        val managerInfo = org.francasio.sing.SingXposedEntry.detectedManagerInfo
         // Initialize settings and register live update receiver
         SingSettings.initInAppleMusic(context, managerInfo) {
             val selectedModel = SingSettings.selectedModelId
@@ -179,7 +180,7 @@ class SingAudioProcessor(
                 Log.i(TAG, "No model selected. Neural Stem Separation Engine disabled (pass-through mode).")
                 isEngineReady = true
                 onEngineReadyListener?.invoke()
-                org.francasio.sing.SingXposedEntry.onSettingsChanged()
+                onSettingsChanged()
                 return@initInAppleMusic
             }
 
@@ -220,7 +221,7 @@ class SingAudioProcessor(
             } else {
                 ensureEngineInitialized()
             }
-            org.francasio.sing.SingXposedEntry.onSettingsChanged()
+            onSettingsChanged()
         }
 
         // Asynchronously warm up the engine in background executor
@@ -268,7 +269,7 @@ class SingAudioProcessor(
                     }
                     isEngineReady = true
                     Log.i(TAG, "Neural Stem Separation Engine initialized (${ModelLoader.activeProviderName})")
-                    SingSettings.sendHeartbeat(context, org.francasio.sing.SingXposedEntry.detectedManagerInfo, ModelLoader.activeProviderShort)
+                    SingSettings.sendHeartbeat(context, managerInfo, ModelLoader.activeProviderShort)
                     onEngineReadyListener?.invoke()
                 } else {
                     Log.w(TAG, "Backend initialization returned null")
@@ -371,7 +372,7 @@ class SingAudioProcessor(
             if (++logCounter % 200 == 1) {
                 Log.i(TAG, "Audio frames active: count=$logCounter, frames=$frameCount, enc=$encoding, ch=$channelCount, rate=$sampleRate, level=$smoothedLevel, singActive=$singActive, preserveSide=${engine.preserveSide}, twoWay=${engine.twoWaySlider}")
                 if (logCounter % 600 == 1) {
-                    SingSettings.sendHeartbeat(context, org.francasio.sing.SingXposedEntry.detectedManagerInfo, ModelLoader.activeProviderShort)
+                    SingSettings.sendHeartbeat(context, managerInfo, ModelLoader.activeProviderShort)
                 }
             }
 

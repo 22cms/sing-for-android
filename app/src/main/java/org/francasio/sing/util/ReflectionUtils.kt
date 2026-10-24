@@ -47,6 +47,47 @@ object ReflectionUtils {
         return matches
     }
 
+    /**
+     * Update-proof lookup: find a method by its signature (return type + parameter
+     * types) regardless of its (possibly obfuscated) name. Useful when R8 renames
+     * methods across app updates.
+     */
+    fun findMethodBySignature(
+        clazz: Class<*>,
+        returnType: Class<*>,
+        vararg paramTypes: Class<*>
+    ): Method? {
+        var current: Class<*>? = clazz
+        while (current != null && current != Any::class.java) {
+            for (method in current.declaredMethods) {
+                if (method.returnType == returnType && method.parameterTypes.contentEquals(paramTypes)) {
+                    method.isAccessible = true
+                    return method
+                }
+            }
+            current = current.superclass
+        }
+        return null
+    }
+
+    /**
+     * Update-proof field lookup by type. When several fields share the type, the
+     * first declared one is returned.
+     */
+    fun findFieldByType(clazz: Class<*>, type: Class<*>, instanceOnly: Boolean = true): Field? {
+        var current: Class<*>? = clazz
+        while (current != null && current != Any::class.java) {
+            for (field in current.declaredFields) {
+                if (field.type == type && (!instanceOnly || !java.lang.reflect.Modifier.isStatic(field.modifiers))) {
+                    field.isAccessible = true
+                    return field
+                }
+            }
+            current = current.superclass
+        }
+        return null
+    }
+
     fun findConstructor(clazz: Class<*>, vararg paramTypes: Class<*>): Constructor<*>? {
         return try {
             val ctor = clazz.getDeclaredConstructor(*paramTypes)
@@ -71,48 +112,62 @@ object ReflectionUtils {
         return null
     }
 
+    private val fieldCache = java.util.Collections.synchronizedMap(HashMap<String, java.lang.reflect.Field?>())
+
+    fun getCachedField(clazz: Class<*>, fieldName: String): java.lang.reflect.Field? {
+        val key = clazz.name + "#" + fieldName
+        synchronized(fieldCache) {
+            if (fieldCache.containsKey(key)) {
+                return fieldCache[key]
+            }
+            val field = findField(clazz, fieldName)
+            fieldCache[key] = field
+            return field
+        }
+    }
+
     fun getObjectField(obj: Any?, fieldName: String): Any? {
         if (obj == null) return null
-        return findField(obj.javaClass, fieldName)?.get(obj)
+        return getCachedField(obj.javaClass, fieldName)?.get(obj)
     }
 
     fun getIntField(obj: Any?, fieldName: String): Int {
         if (obj == null) return 0
-        return findField(obj.javaClass, fieldName)?.getInt(obj) ?: 0
+        return getCachedField(obj.javaClass, fieldName)?.getInt(obj) ?: 0
     }
 
     fun getFloatField(obj: Any?, fieldName: String): Float {
         if (obj == null) return 0.0f
-        return findField(obj.javaClass, fieldName)?.getFloat(obj) ?: 0.0f
+        return getCachedField(obj.javaClass, fieldName)?.getFloat(obj) ?: 0.0f
     }
 
     fun getBooleanField(obj: Any?, fieldName: String): Boolean {
         if (obj == null) return false
-        return findField(obj.javaClass, fieldName)?.getBoolean(obj) ?: false
+        return getCachedField(obj.javaClass, fieldName)?.getBoolean(obj) ?: false
     }
 
     fun setObjectField(obj: Any?, fieldName: String, value: Any?) {
         if (obj == null) return
-        findField(obj.javaClass, fieldName)?.set(obj, value)
+        getCachedField(obj.javaClass, fieldName)?.set(obj, value)
     }
 
     fun setIntField(obj: Any?, fieldName: String, value: Int) {
         if (obj == null) return
-        findField(obj.javaClass, fieldName)?.setInt(obj, value)
+        getCachedField(obj.javaClass, fieldName)?.setInt(obj, value)
     }
 
     fun setFloatField(obj: Any?, fieldName: String, value: Float) {
         if (obj == null) return
-        findField(obj.javaClass, fieldName)?.setFloat(obj, value)
+        getCachedField(obj.javaClass, fieldName)?.setFloat(obj, value)
     }
 
     fun setBooleanField(obj: Any?, fieldName: String, value: Boolean) {
         if (obj == null) return
-        findField(obj.javaClass, fieldName)?.setBoolean(obj, value)
+        getCachedField(obj.javaClass, fieldName)?.setBoolean(obj, value)
     }
 
     fun getStaticFloatField(clazz: Class<*>, fieldName: String): Float {
-        return findField(clazz, fieldName)?.getFloat(null) ?: 0.0f
+        return getCachedField(clazz, fieldName)?.getFloat(null) ?: 0.0f
     }
 
     fun setStaticFloatField(clazz: Class<*>, fieldName: String, value: Float) {

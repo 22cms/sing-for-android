@@ -75,6 +75,7 @@ class MainActivity : ComponentActivity() {
     private val forceSongEligibilityState = mutableStateOf(false)
     private val blurUnfocusedLyricsState = mutableStateOf(true)
     private val centerGroupLyricsState = mutableStateOf(true)
+    private val englishTranslationFallbackState = mutableStateOf(true)
     private val ecoModeState = mutableStateOf(true)
     private val hardwareTargetState = mutableStateOf(SingSettings.TARGET_NPU)
     private val threadCountState = mutableIntStateOf(4)
@@ -97,6 +98,7 @@ class MainActivity : ComponentActivity() {
         forceSongEligibilityState.value = SingSettings.forceSongEligibility
         blurUnfocusedLyricsState.value = SingSettings.blurUnfocusedLyrics
         centerGroupLyricsState.value = SingSettings.centerGroupLyrics
+        englishTranslationFallbackState.value = SingSettings.englishTranslationFallback
         ecoModeState.value = SingSettings.ecoMode
         hardwareTargetState.value = SingSettings.hardwareTarget
         threadCountState.intValue = SingSettings.threadCount.coerceIn(1, 12)
@@ -145,6 +147,7 @@ class MainActivity : ComponentActivity() {
             val forceSongEligibility by forceSongEligibilityState
             val blurUnfocusedLyrics by blurUnfocusedLyricsState
             val centerGroupLyrics by centerGroupLyricsState
+            val englishTranslationFallback by englishTranslationFallbackState
             val ecoMode by ecoModeState
             val hardwareTarget by hardwareTargetState
             val threadCount by threadCountState
@@ -235,6 +238,7 @@ class MainActivity : ComponentActivity() {
                         forceSongEligibility = forceSongEligibility,
                         blurUnfocusedLyrics = blurUnfocusedLyrics,
                         centerGroupLyrics = centerGroupLyrics,
+                        englishTranslationFallback = englishTranslationFallback,
                         ecoMode = ecoMode,
                         hardwareTarget = hardwareTarget,
                         selectedModelId = selectedModelId,
@@ -270,6 +274,15 @@ class MainActivity : ComponentActivity() {
                         onCenterGroupLyricsChange = { isChecked ->
                             centerGroupLyricsState.value = isChecked
                             SingSettings.saveLocal(this@MainActivity, SingSettings.KEY_CENTER_GROUP_LYRICS, isChecked)
+                            SingSettings.broadcastSettings(this@MainActivity)
+                        },
+                        onEnglishTranslationFallbackChange = { isChecked ->
+                            englishTranslationFallbackState.value = isChecked
+                            SingSettings.saveLocal(
+                                this@MainActivity,
+                                SingSettings.KEY_ENGLISH_TRANSLATION_FALLBACK,
+                                isChecked
+                            )
                             SingSettings.broadcastSettings(this@MainActivity)
                         },
                         onEcoModeChange = { isChecked ->

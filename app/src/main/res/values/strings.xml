@@ -29,11 +29,12 @@
     <string name="desc_two_way_slider" formatted="false">Splits the Sing slider range: 0–50% lowers vocals for Karaoke, while 50–100% lowers instrumentals to isolate vocals (acapella).</string>
 
     <string name="setting_center_group_lyrics_title">Center Group Lyrics</string>
-    <string name="desc_center_group_lyrics">Horizontally centers collective, ensemble, and choir lyric lines in duet tracks instead of keeping them left-aligned.</string>
+    <string name="desc_center_group_lyrics">Horizontally centers collective, ensemble, and choir lyric lines in duet tracks.</string>
 
     <string name="setting_blur_unfocused_lyrics_title">Blur Unfocused Lyrics</string>
-    <string name="desc_blur_unfocused_lyrics">Applies a blur to lyric lines that are not currently being sung, keeping the active line sharp and readable.</string>
-
+    <string name="desc_blur_unfocused_lyrics">Applies a blur to lyric lines that are not currently being sung.</string>
+    <string name="setting_english_translation_fallback_title">English Translation Fallback</string>
+    <string name="desc_english_translation_fallback">Falls back to the English translation of lyrics when a translation is not available in the system language.</string>
     <string name="setting_full_vocal_mute_title">Remove Slider Limits</string>
     <string name="setting_full_vocal_mute_desc" formatted="false">Unlocks 0% vocal floor (full mute) and allows to be set to 100% without disabling Sing Mode.</string>
 

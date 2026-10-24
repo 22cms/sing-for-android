@@ -64,6 +64,7 @@ fun MainScreen(
     forceSongEligibility: Boolean,
     blurUnfocusedLyrics: Boolean,
     centerGroupLyrics: Boolean,
+    englishTranslationFallback: Boolean,
     ecoMode: Boolean,
     hardwareTarget: String,
     selectedModelId: String,
@@ -75,6 +76,7 @@ fun MainScreen(
     onForceSongEligibilityChange: (Boolean) -> Unit,
     onBlurUnfocusedLyricsChange: (Boolean) -> Unit,
     onCenterGroupLyricsChange: (Boolean) -> Unit,
+    onEnglishTranslationFallbackChange: (Boolean) -> Unit,
     onEcoModeChange: (Boolean) -> Unit,
     onHardwareTargetChange: (String) -> Unit,
     onThreadCountChange: (Int) -> Unit,
@@ -167,8 +169,10 @@ fun MainScreen(
             LyricsSettingsCard(
                 blurUnfocusedLyrics = blurUnfocusedLyrics,
                 centerGroupLyrics = centerGroupLyrics,
+                englishTranslationFallback = englishTranslationFallback,
                 onBlurUnfocusedLyricsChange = onBlurUnfocusedLyricsChange,
-                onCenterGroupLyricsChange = onCenterGroupLyricsChange
+                onCenterGroupLyricsChange = onCenterGroupLyricsChange,
+                onEnglishTranslationFallbackChange = onEnglishTranslationFallbackChange
             )
 
             Spacer(modifier = Modifier.height(16.dp))
@@ -225,6 +229,7 @@ fun MainScreenPreview() {
             forceSongEligibility = true,
             blurUnfocusedLyrics = true,
             centerGroupLyrics = true,
+            englishTranslationFallback = true,
             ecoMode = true,
             hardwareTarget = SingSettings.TARGET_NPU,
             selectedModelId = "uvr_mdxnet_fp16",
@@ -247,6 +252,7 @@ fun MainScreenPreview() {
             onForceSongEligibilityChange = {},
             onBlurUnfocusedLyricsChange = {},
             onCenterGroupLyricsChange = {},
+            onEnglishTranslationFallbackChange = {},
             onEcoModeChange = {},
             onHardwareTargetChange = {},
             onThreadCountChange = {},
