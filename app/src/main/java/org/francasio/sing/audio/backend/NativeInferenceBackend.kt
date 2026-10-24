@@ -42,6 +42,9 @@ class NativeInferenceBackend(
     init {
         Log.i(TAG, "Initializing native Vi-NNet engine (${modelFile.name}, " +
                 "${modelFile.length() / 1024 / 1024} MB, threads=$threads)...")
+        if (modelInfo.blockSize !in 1..4096) {
+            throw IllegalStateException("Native Vi-NNet requires blockSize in 1..4096, got ${modelInfo.blockSize}")
+        }
         handle = nativeCreate(modelFile.absolutePath, threads)
         if (handle == 0L) {
             throw IllegalStateException(

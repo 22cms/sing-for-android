@@ -504,7 +504,7 @@ class AiStemSeparationEngine(
                     if (nnMs < tmMinMs) tmMinMs = nnMs
                     if (nnMs > tmMaxMs) tmMaxMs = nnMs
                     if (tmBlocks % 100 == 0L) {
-                        Log.i(TAG, "Time-domain NN: $tmBlocks blocks, avg ${tmTotalMs / tmBlocks} ms, min $tmMinMs ms, max $tmMaxMs ms (budget 92.9 ms/block, ${currentBackend.providerName})")
+                        Log.d(TAG, "Time-domain NN: $tmBlocks blocks, avg ${tmTotalMs / tmBlocks} ms, min $tmMinMs ms, max $tmMaxMs ms (budget 92.9 ms/block, ${currentBackend.providerName})")
                     }
 
                     val makeCenter = preserveSide
@@ -678,7 +678,7 @@ class AiStemSeparationEngine(
                         stftEngine.centerCutPcm(chunkRawVocalPcm, chunkCenterPcm, CHUNK_SAMPLES)
                     }
                     val t1 = System.currentTimeMillis()
-                    Log.i(TAG, "STFT chunk separated in ${t1 - t0} ms [stft=${tStft - t0}ms, nn=${tInf - tStft}ms, istft=${t1 - tInf}ms] (window: 5.92s, step: 4.92s, gen: $myGen, provider: ${currentBackend.providerName})")
+                    Log.d(TAG, "STFT chunk separated in ${t1 - t0} ms [stft=${tStft - t0}ms, nn=${tInf - tStft}ms, istft=${t1 - tInf}ms] (window: 5.92s, step: 4.92s, gen: $myGen, provider: ${currentBackend.providerName})")
 
                     var isStale = false
                     lock.withLock {

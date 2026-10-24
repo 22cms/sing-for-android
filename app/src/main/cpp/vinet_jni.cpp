@@ -111,7 +111,8 @@ Java_org_francasio_sing_audio_backend_NativeInferenceBackend_nativeProcess(
   auto* h = (VinetHandle*)(intptr_t)handle;
   if (h == nullptr) return;
 
-  const int bs = blockSize > 0 ? blockSize : 4096;
+  int bs = blockSize > 0 ? blockSize : 4096;
+  if (bs > 4096) bs = 4096; // VinetHandle planar buffers are sized for 4096 frames
   int n = (int)frameCount;
   if (n > bs) n = bs;
   if (n < 0) n = 0;

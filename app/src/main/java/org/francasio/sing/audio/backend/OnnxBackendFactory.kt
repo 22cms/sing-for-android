@@ -140,94 +140,12 @@ object OnnxBackendFactory {
                 }
             }
 
-            val htpLib = File(targetDir, "libQnnHtp.so")
-            val ortLib = File(targetDir, "libonnxruntime.so")
-            val alreadyExtracted = htpLib.exists() && htpLib.length() > 0 && ortLib.exists() && ortLib.length() > 0
+            // ONNX Runtime + QNN accelerator are downloaded from Maven by
+            // NativeLibDownloader (see above); they are NOT shipped in the APK, so
+            // there is nothing to extract from it here. The previous extraction
+            // loop only polluted the cache dir with libsing_dsp.so and friends.
+            Log.i(TAG, "ONNX/QNN native libraries expected in ${targetDir.absolutePath} (downloaded on demand)")
 
-            if (!alreadyExtracted) {
-                val candidateApks = mutableListOf<String>()
-                try {
-                    context.applicationInfo?.sourceDir?.let { if (File(it).exists()) candidateApks.add(it) }
-                } catch (_: Throwable) {}
-                if (moduleApkPath.isNotEmpty() && !candidateApks.contains(moduleApkPath)) candidateApks.add(moduleApkPath)
-                val resolved = SingSettings.resolvedModulePath
-                if (!resolved.isNullOrEmpty() && !candidateApks.contains(resolved)) candidateApks.add(resolved)
-                candidateApks.add(File(context.cacheDir, "lspatch_embedded_sing.apk").absolutePath)
-                val lspatchDir = File(context.cacheDir, "lspatch/org.francasio.sing")
-                if (lspatchDir.exists() && lspatchDir.isDirectory) {
-                    lspatchDir.listFiles { f -> f.extension == "apk" }?.forEach { apk ->
-                        if (!candidateApks.contains(apk.absolutePath)) candidateApks.add(apk.absolutePath)
-                    }
-                }
-                try {
-                    val pmApk = context.packageManager.getApplicationInfo("org.francasio.sing", 0).sourceDir
-                    if (pmApk != null && !candidateApks.contains(pmApk)) candidateApks.add(pmApk)
-                } catch (_: Throwable) {}
-
-                for (apkPath in candidateApks) {
-                    val apkFile = File(apkPath)
-                    if (apkFile.exists() && apkFile.canRead()) {
-                        try {
-                            ZipFile(apkFile).use { zip ->
-                                val entries = zip.entries()
-                                while (entries.hasMoreElements()) {
-                                    val entry = entries.nextElement()
-                                    // Only extract libs matching the *actual* device ABI. Mixing arm64-v8a
-                                    // with x86_64 (e.g. a universal APK extracted on top of a leftover arm
-                                    // dir) previously caused ARM .so to overwrite x86 ones into the same
-                                    // flat cache directory and broke ORT's UnsatisfiedLinkError resolution.
-                                    if (entry.name.startsWith("lib/$primaryAbi/") && entry.name.endsWith(".so")) {
-                                        val fileName = entry.name.substringAfterLast('/')
-                                        val outFile = File(targetDir, fileName)
-                                        // Evict stale libs from a previous hybrid extraction (e.g. ARM64 libs
-                                        // that leaked into an x86_64 cache during an older build): drop any
-                                        // cached .so if its ELF machine marker does not match the device ABI.
-                                        if (outFile.exists()) {
-                                            try {
-                                                val hdr = outFile.inputStream().use { it.readNBytes(20) }
-                                                if (hdr.size >= 20) {
-                                                    val eMachine = (hdr[19].toInt() and 0xff) shl 8 or (hdr[18].toInt() and 0xff)
-                                                    val want = if (primaryAbi.startsWith("x86")) 0x003E else 0x00B7
-                                                    if (eMachine != 0x0000 && eMachine != want) outFile.delete()
-                                                }
-                                            } catch (_: Throwable) {}
-                                        }
-                                        if (!outFile.exists() || outFile.length() != entry.size) {
-                                            zip.getInputStream(entry).use { input ->
-                                                FileOutputStream(outFile).use { output ->
-                                                    input.copyTo(output)
-                                                }
-                                            }
-                                        }
-                                        outFile.setReadable(true, false)
-                                        outFile.setExecutable(true, false)
-                                    }
-                                }
-                            }
-                        } catch (e: Throwable) {
-                            Log.w(TAG, "Failed extracting native libs from $apkPath: ${e.message}")
-                        }
-                    }
-                }
-            } else {
-                Log.i(TAG, "ONNX/QNN native libraries already extracted in ${targetDir.absolutePath}")
-            }
-
-            // QNN HTP needs the vendor FastRPC transport:
-            //   libQnnHtpV75Stub.so -> libcdsprpc.so -> { libhidlbase,
-            //   libhardware, libutils, libcutils, vendor.qti.hardware.dsp@1.0,
-            //   libdmabufheap, libvmmem, libc++ }
-            // From an app linker namespace only public libraries (libc/liblog/
-            // libdl/libm and the /vendor public list) are resolvable by SONAME,
-            // and /vendor/lib64 itself is never searched, so every non-public
-            // dependency ships inside this APK and is preloaded from the extracted
-            // cache dir in dependency order: a library already loaded in the
-            // process satisfies DT_NEEDED lookups by SONAME.
-            //
-            // libdl_android.so is special - it needs ld-android.so (the linker
-            // itself), which only resolves via a bionic special case; if the real
-            // one cannot load, the stub built as libdl_android_stub.so (SONAME
-            // libdl_android.so) takes its place.
             val libsToLoad = listOf(
                 "libc++.so",
                 "ld-android.so",

@@ -246,9 +246,7 @@ class OnnxInferenceBackend(
         }
 
         try {
-            val tRun0 = System.nanoTime()
             val result = session.run(inputMap)
-            Log.i("AppleSing_ONNX", "time-domain session.run: ${(System.nanoTime() - tRun0) / 1_000_000.0} ms")
             try {
                 // Audio output
                 val outAudioOpt = result.get(outputNames[0])

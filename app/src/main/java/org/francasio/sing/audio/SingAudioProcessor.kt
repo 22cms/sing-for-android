@@ -351,6 +351,17 @@ class SingAudioProcessor(
                 return
             }
 
+            // Mono tracks are not supported by the stem engine: pass through
+            // untouched instead of feeding stale buffers to the output path.
+            if (channelCount < 2) {
+                passThrough(processorObj, inputBuffer)
+                try {
+                    ReflectionUtils.setFloatField(processorObj, "level", smoothedLevel)
+                    ReflectionUtils.setIntField(processorObj, "mode", 0)
+                } catch (t: Throwable) {}
+                return
+            }
+
             val totalSamples = frameCount * channelCount
             ensureCapacity(maxOf(65536, totalSamples * 8))
 
@@ -423,6 +434,10 @@ class SingAudioProcessor(
                         engine.pushInput(resampledInFloats, frames44k)
                     }
                 }
+            } else {
+                // Backpressure: do not feed the engine, but still consume the
+                // input buffer so ExoPlayer advances instead of reprocessing.
+                inputBuffer.position(inputBuffer.limit())
             }
 
             if (channelCount >= 2) {
