@@ -99,7 +99,7 @@
     <!-- Info Screen -->
     <string name="title_info">Info</string>
     <string name="action_info">Info</string>
-    <string name="info_app_subtitle">Separazione Neurale Vocale in Tempo Reale per Apple Music</string>
+    <string name="info_app_subtitle">Separazione Vocale in Tempo Reale per Apple Music</string>
     <string name="info_theming_title">Aspetto e Tema</string>
     <string name="info_material_you_title">Tema Material You</string>
     <string name="info_material_you_desc">Palette di colori dinamica generata dallo sfondo di sistema.</string>

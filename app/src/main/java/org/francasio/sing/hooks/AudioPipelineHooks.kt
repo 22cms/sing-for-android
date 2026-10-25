@@ -83,8 +83,6 @@ class AudioPipelineHooks(
                             val isReady = audioProcessor?.isEngineReady == true
                             if (isReady && org.francasio.sing.provider.SingSettings.forceSongEligibility) {
                                 true
-                            } else if (!isReady) {
-                                false
                             } else {
                                 chain.proceed()
                             }

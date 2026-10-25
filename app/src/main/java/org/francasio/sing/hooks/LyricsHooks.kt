@@ -116,22 +116,38 @@ class LyricsHooks(
                     hookMethod(m) { chain ->
                         currentLyricsFragment = WeakReference(chain.thisObject)
                         val isReady = audioProcessor?.isEngineReady == true
-                        if (!isReady) {
-                            // Engine is still loading in background: keep Sing button strictly hidden
-                            return@hookMethod chain.proceed(arrayOf(false))
-                        }
                         val origArg = chain.getArg(0) as Boolean
-                        if (origArg) {
-                            return@hookMethod chain.proceed(arrayOf(true))
+
+                        val eligible = if (!isReady) {
+                            true
+                        } else {
+                            origArg || (org.francasio.sing.provider.SingSettings.forceSongEligibility && run {
+                                val frag = chain.thisObject
+                                val songInfoPtr = try { ReflectionUtils.getObjectField(frag, "h1") } catch (_: Throwable) { null }
+                                songInfoPtr != null || audioProcessor != null
+                            })
                         }
-                        if (org.francasio.sing.provider.SingSettings.forceSongEligibility) {
-                            val frag = chain.thisObject
-                            val songInfoPtr = try {
-                                ReflectionUtils.getObjectField(frag, "h1")
-                            } catch (_: Throwable) { null }
-                            if (songInfoPtr != null || audioProcessor != null) {
-                                return@hookMethod chain.proceed(arrayOf(true))
+
+                        val vocalCtrl = currentVocalCtrl?.get()
+                        if (vocalCtrl != null) {
+                            if (eligible) {
+                                vocalCtrl.visibility = View.VISIBLE
+                                if (!isReady) {
+                                    org.francasio.sing.SingXposedEntry.startLoadingBlink(vocalCtrl)
+                                    mainHandler.postDelayed({
+                                        logInfo("POST-D2: vis=${vocalCtrl.visibility} alpha=${vocalCtrl.alpha} parentVis=${(vocalCtrl.parent as? View)?.visibility}")
+                                    }, 300L)
+                                } else {
+                                    org.francasio.sing.SingXposedEntry.stopLoadingBlink(vocalCtrl)
+                                }
+                            } else {
+                                org.francasio.sing.SingXposedEntry.stopLoadingBlink(vocalCtrl)
+                                vocalCtrl.visibility = View.GONE
                             }
+                        }
+
+                        if (eligible) {
+                            return@hookMethod chain.proceed(arrayOf(true))
                         }
                         chain.proceed(arrayOf(false))
                     }
@@ -187,12 +203,18 @@ class LyricsHooks(
                                     currentVocalCtrl = WeakReference(vocalCtrl)
                                     updateVocalAttenuationFloor(vocalCtrl.javaClass)
                                     val isReady = audioProcessor?.isEngineReady == true
-                                    if (isReady && org.francasio.sing.provider.SingSettings.forceSongEligibility) {
+                                    if (org.francasio.sing.provider.SingSettings.forceSongEligibility || !isReady) {
                                         vocalCtrl.visibility = View.VISIBLE
-                                        logInfo("Forced vocal_ctrl visibility to VISIBLE in onCreateView (engine ready)")
+                                        if (!isReady) {
+                                            org.francasio.sing.SingXposedEntry.startLoadingBlink(vocalCtrl)
+                                        } else {
+                                            org.francasio.sing.SingXposedEntry.stopLoadingBlink(vocalCtrl)
+                                        }
+                                        logInfo("Forced vocal_ctrl visibility to VISIBLE in onCreateView (isReady=$isReady)")
                                     } else {
                                         vocalCtrl.visibility = View.GONE
-                                        logInfo("Engine not ready: vocal_ctrl set to GONE in onCreateView")
+                                        org.francasio.sing.SingXposedEntry.stopLoadingBlink(vocalCtrl)
+                                        logInfo("vocal_ctrl set to GONE in onCreateView until D2 resolves eligibility")
                                     }
                                     updateSliderIcon(vocalCtrl)
                                 }

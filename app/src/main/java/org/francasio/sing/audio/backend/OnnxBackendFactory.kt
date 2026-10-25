@@ -22,6 +22,8 @@ object OnnxBackendFactory {
     private var ortSession: OrtSession? = null
     @Volatile
     private var onnxNativeLibsLoaded = false
+    @Volatile
+    private var vendorNativeLibsLoaded = false
 
     /**
      * Diagnostic level (set via the benchmark intent extra "qnn_debug"): 0 off,
@@ -87,7 +89,72 @@ object OnnxBackendFactory {
     var activeProviderShort: String = "Unknown"
         private set
 
-    fun ensureOnnxNativeLibrariesLoaded(context: Context, moduleApkPath: String = "") {
+    fun ensureVendorNativeLibrariesLoaded(context: Context, moduleApkPath: String = "", onProgress: (String, Float) -> Unit = { _, _ -> }) {
+        if (vendorNativeLibsLoaded) return
+        synchronized(this) {
+            if (vendorNativeLibsLoaded) return
+            try { System.loadLibrary("sing_dsp") } catch (_: Throwable) {}
+            val primaryAbi = android.os.Build.SUPPORTED_ABIS.firstOrNull() ?: "arm64-v8a"
+            val abiDirName = if (primaryAbi.startsWith("arm64")) "arm64" else primaryAbi
+            setupFastRpcSearchPaths(context, moduleApkPath, primaryAbi)
+            val nativeDir = File(context.applicationInfo.nativeLibraryDir)
+            if (File(nativeDir, "libQnnHtp.so").exists()) {
+                Log.i(TAG, "Vendor/QNN libs already present in nativeLibraryDir")
+                vendorNativeLibsLoaded = true
+                return
+            }
+            if (moduleApkPath.isNotEmpty() && File(File(moduleApkPath).parentFile, "lib/$abiDirName/libQnnHtp.so").exists()) {
+                Log.i(TAG, "Vendor/QNN libs already present in module lib dir")
+                vendorNativeLibsLoaded = true
+                return
+            }
+            val targetDir = File(context.cacheDir, "ort_libs_$primaryAbi")
+            targetDir.mkdirs()
+            if (DeviceHelper.isQualcommWithHexagonHtp && !NativeLibDownloader.isQnnRuntimeInstalled(context)) {
+                val skel = NativeLibDownloader.requiredSkeleton(context)
+                if (skel != null) {
+                    Log.i(TAG, "QNN runtime native libs missing - attempting download")
+                    NativeLibDownloader.downloadQnnRuntime(context, onProgress)
+                }
+            }
+            val vendorLibs = listOf(
+                "libc++.so", "ld-android.so", "libdl_android.so", "libbase.so",
+                "libdmabufheap.so", "libcutils.so", "libvndksupport.so", "libutils.so",
+                "libhardware.so", "libhidlbase.so", "libvmmem.so",
+                "vendor.qti.hardware.dsp@1.0.so", "libcdsprpc.so",
+                "libQnnSystem.so", "libQnnHtpV75Stub.so", "libQnnHtp.so"
+            )
+            for (libName in vendorLibs) {
+                val candidates = if (libName == "libdl_android.so")
+                    listOf("libdl_android.so", "libdl_android_stub.so") else listOf(libName)
+                var loaded = false
+                for (candidate in candidates) {
+                    val libFile = File(targetDir, candidate)
+                    if (!libFile.exists()) continue
+                    try {
+                        System.load(libFile.absolutePath)
+                        Log.i(TAG, "Successfully loaded vendor native library: ${libFile.name}")
+                        loaded = true
+                        break
+                    } catch (t: Throwable) {
+                        Log.w(TAG, "Failed loading ${libFile.name}: ${t.message}")
+                    }
+                }
+                if (!loaded && (libName == "libcdsprpc.so" || libName == "vendor.qti.hardware.dsp@1.0.so")) {
+                    try {
+                        val bareName = libName.removePrefix("lib").removeSuffix(".so")
+                        System.loadLibrary(bareName)
+                        Log.i(TAG, "Successfully loaded system $libName via loadLibrary")
+                    } catch (t: Throwable) {
+                        Log.w(TAG, "System.loadLibrary($libName) failed: ${t.message}")
+                    }
+                }
+            }
+            vendorNativeLibsLoaded = true
+        }
+    }
+
+    fun ensureOnnxNativeLibrariesLoaded(context: Context, moduleApkPath: String = "", onProgress: (String, Float) -> Unit = { _, _ -> }) {
         if (onnxNativeLibsLoaded) return
         synchronized(this) {
             if (onnxNativeLibsLoaded) return
@@ -130,13 +197,13 @@ object OnnxBackendFactory {
             // fetch them from Maven Central before attempting APK extraction.
             if (!NativeLibDownloader.isOnnxRuntimeInstalled(context)) {
                 Log.i(TAG, "ONNX Runtime native libs missing - attempting download")
-                NativeLibDownloader.downloadOnnxRuntime(context) { _, _ -> }
+                NativeLibDownloader.downloadOnnxRuntime(context, onProgress)
             }
             if (DeviceHelper.isQualcommWithHexagonHtp && !NativeLibDownloader.isQnnRuntimeInstalled(context)) {
                 val skel = NativeLibDownloader.requiredSkeleton(context)
                 if (skel != null) {
                     Log.i(TAG, "QNN runtime native libs missing - attempting download")
-                    NativeLibDownloader.downloadQnnRuntime(context) { _, _ -> }
+                    NativeLibDownloader.downloadQnnRuntime(context, onProgress)
                 }
             }
 

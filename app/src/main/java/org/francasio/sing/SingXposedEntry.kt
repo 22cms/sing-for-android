@@ -159,6 +159,45 @@ class SingXposedEntry : XposedModule() {
             }
         var currentVocalCtrl: WeakReference<View>? = null
 
+        private var loadingBlinkAnimator: android.animation.ValueAnimator? = null
+
+        fun startLoadingBlink(view: View) {
+            if (Looper.myLooper() != Looper.getMainLooper()) {
+                mainHandler.post { startLoadingBlink(view) }
+                return
+            }
+            if (loadingBlinkAnimator != null) return
+            // Animate only the inner icon so we don't fight the app's own
+            // alpha animations on the whole vocal_ctrl container.
+            val iconView = view.findViewById<View>(
+                view.resources.getIdentifier("vocal_off", "id", "com.apple.android.music")
+            ) ?: view
+            loadingBlinkAnimator = android.animation.ValueAnimator.ofFloat(0.3f, 0.7f).apply {
+                duration = 1000L
+                repeatMode = android.animation.ValueAnimator.REVERSE
+                repeatCount = android.animation.ValueAnimator.INFINITE
+                interpolator = android.view.animation.PathInterpolator(0.4f, 0f, 0.2f, 1f)
+                addUpdateListener { va ->
+                    iconView.alpha = va.animatedValue as Float
+                }
+                start()
+            }
+            Log.i(TAG, "Started loading blink on vocal icon")
+        }
+
+        fun stopLoadingBlink(view: View?) {
+            if (Looper.myLooper() != Looper.getMainLooper()) {
+                mainHandler.post { stopLoadingBlink(view) }
+                return
+            }
+            loadingBlinkAnimator?.cancel()
+            loadingBlinkAnimator = null
+            val target = view?.let {
+                it.findViewById<View>(it.resources.getIdentifier("vocal_off", "id", "com.apple.android.music")) ?: it
+            }
+            target?.alpha = 1.0f
+        }
+
         fun onEngineReady() {
             mainHandler.post {
                 Log.i(TAG, "Neural engine is ready!")
@@ -471,25 +510,27 @@ class SingXposedEntry : XposedModule() {
         private fun getInstrumentalDrawable(context: Context): Drawable? {
             if (cachedInstrumentalDrawable != null) return cachedInstrumentalDrawable
 
-            // Decode embedded Base64 PNG directly into ExactSizeDrawable (no external file, asset, or theme dependencies)
+            // Load instrumental icon from module drawable resource
             try {
-                val bytes = android.util.Base64.decode(
-                    org.francasio.sing.util.InstrumentalIconData.PNG_BASE64,
-                    android.util.Base64.DEFAULT
-                )
-                val bitmap = android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
-                if (bitmap != null) {
-                    val baseDrawable = BitmapDrawable(context.resources, bitmap)
-                    val targetW = defaultMicDrawable?.intrinsicWidth?.takeIf { it > 0 }
-                        ?: (36 * context.resources.displayMetrics.density).toInt()
-                    val targetH = defaultMicDrawable?.intrinsicHeight?.takeIf { it > 0 }
-                        ?: (36 * context.resources.displayMetrics.density).toInt()
-                    cachedInstrumentalDrawable = ExactSizeDrawable(baseDrawable, targetW, targetH)
-                    Log.i(TAG, "Loaded ic_instrumental via embedded Base64 PNG (${targetW}x${targetH})")
-                    return cachedInstrumentalDrawable
+                val moduleContext = try {
+                    context.createPackageContext("org.francasio.sing", Context.CONTEXT_IGNORE_SECURITY)
+                } catch (_: Throwable) { null }
+                val res = moduleContext?.resources
+                val resId = res?.getIdentifier("ic_slider_instrumental", "drawable", "org.francasio.sing") ?: 0
+                if (res != null && resId != 0) {
+                    val rawDrawable = androidx.core.content.res.ResourcesCompat.getDrawable(res, resId, moduleContext!!.theme)
+                    if (rawDrawable != null) {
+                        val targetW = defaultMicDrawable?.intrinsicWidth?.takeIf { it > 0 }
+                            ?: (36 * context.resources.displayMetrics.density).toInt()
+                        val targetH = defaultMicDrawable?.intrinsicHeight?.takeIf { it > 0 }
+                            ?: (36 * context.resources.displayMetrics.density).toInt()
+                        cachedInstrumentalDrawable = ExactSizeDrawable(rawDrawable, targetW, targetH)
+                        Log.i(TAG, "Loaded ic_slider_instrumental from module drawable (${targetW}x${targetH})")
+                        return cachedInstrumentalDrawable
+                    }
                 }
             } catch (t: Throwable) {
-                Log.w(TAG, "Base64 decode failed: ${t.message}")
+                Log.w(TAG, "Failed to load ic_slider_instrumental: ${t.message}")
             }
 
             return cachedInstrumentalDrawable

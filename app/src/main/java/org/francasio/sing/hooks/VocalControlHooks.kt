@@ -235,6 +235,31 @@ class VocalControlHooks(
                 }
             }
 
+            val isReady = audioProcessor()?.isEngineReady == true
+            if (!isReady && !isSingOn(vocalCtrl)) {
+                when (event.actionMasked) {
+                    MotionEvent.ACTION_DOWN -> {
+                        // Keep long-press / right-click settings launch working
+                        // while the engine is still loading.
+                    }
+                    MotionEvent.ACTION_MOVE -> {
+                        val slop = ViewConfiguration.get(vocalCtrl.context).scaledTouchSlop
+                        if (kotlin.math.abs(event.x - downX) > slop || kotlin.math.abs(event.y - downY) > slop) {
+                            longPressRunnable?.let { mainHandler.removeCallbacks(it) }
+                            longPressRunnable = null
+                        }
+                        return@hookMethod true
+                    }
+                    MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                        longPressRunnable?.let { mainHandler.removeCallbacks(it) }
+                        longPressRunnable = null
+                        // Ignore taps to enable sing while engine is loading
+                        logInfo("Ignoring tap on VocalAttenuationControl: engine is not ready yet")
+                        return@hookMethod true
+                    }
+                }
+            }
+
             val isSingOn = isSingOn(vocalCtrl)
             if (isSingOn) {
                 longPressRunnable?.let { mainHandler.removeCallbacks(it) }

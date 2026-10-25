@@ -14,7 +14,7 @@
     <string name="whats_new_title_3" translatable="false">Better Side-Channel Preservation</string>
     <string name="whats_new_desc_3" translatable="false">Spectral processing preserves backing vocals and stereo effects more faithfully, with improved mono compatibility.</string>
     <string name="whats_new_title_4" translatable="false">Update Highlights and Automatic Checking</string>
-    <string name="whats_new_desc_4" translatable="false">Sing for Android now looks for updates automatically and shows you what’s new in a pop-up.</string>
+    <string name="whats_new_desc_4" translatable="false">Sing for Android now looks for updates automatically and shows you what’s has changed in a pop-up view.</string>
     <string name="whats_new_minor_changes">Show minor changes</string>
     <string name="whats_new_close">Close</string>
     <string name="update_available_heading">New Update Available</string>
@@ -123,7 +123,7 @@
     <!-- Info Screen -->
     <string name="title_info">Info</string>
     <string name="action_info">Info</string>
-    <string name="info_app_subtitle">Real-Time Neural Stem Separation for Apple Music</string>
+    <string name="info_app_subtitle">Real-Time Stem Separation for Apple Music</string>
     <string name="info_theming_title">Appearance &amp; Theme</string>
     <string name="info_material_you_title">Material You Theme</string>
     <string name="info_material_you_desc">Dynamic color palette generated from your system wallpaper.</string>

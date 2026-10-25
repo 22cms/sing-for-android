@@ -646,10 +646,12 @@ object ModelLoader {
                 Log.i(TAG, "Initializing MNN backend for ${modelInfo.id} (${modelFile.name}, threads=$targetThreads, target=$hardwareTarget)...")
                 if (hardwareTarget == SingSettings.TARGET_NPU || hardwareTarget == SingSettings.TARGET_NNAPI) {
                     try {
-                        OnnxBackendFactory.ensureOnnxNativeLibrariesLoaded(context, moduleApkPath)
-                        Log.i(TAG, "Preloaded QNN native libraries for MNN")
+                        OnnxBackendFactory.ensureVendorNativeLibrariesLoaded(context, moduleApkPath) { label, progress ->
+                            Log.i(TAG, "$label: ${(progress * 100).toInt()}%")
+                        }
+                        Log.i(TAG, "Preloaded vendor/QNN native libraries for MNN")
                     } catch (t: Throwable) {
-                        Log.w(TAG, "Could not preload QNN native libraries for MNN: ${t.message}")
+                        Log.w(TAG, "Could not preload vendor/QNN native libraries for MNN: ${t.message}")
                     }
                 }
                 val mnn = MnnInferenceBackend(modelFile, targetThreads, hardwareTarget, modelInfo)

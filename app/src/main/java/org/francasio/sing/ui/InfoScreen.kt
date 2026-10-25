@@ -23,6 +23,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ExitToApp
+import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.HorizontalDivider
@@ -141,79 +142,72 @@ fun InfoScreen(
         ) {
             Spacer(modifier = Modifier.height(statusBarTop + 140.dp))
 
-            // 1. App Identity Card
-            Card(
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(18.dp),
-                colors = CardDefaults.cardColors(containerColor = CardDark),
-                elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
+            // 1. App Identity
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 12.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
             ) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(20.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally
-                ) {
-                    Box(
-                        modifier = if (isMaterialYou) {
-                            Modifier
-                                .size(72.dp)
-                                .clip(CircleShape)
-                                .background(Neutral1_800)
-                        } else {
-                            Modifier
-                                .size(72.dp)
-                                .clip(CircleShape)
-                                .background(
-                                    Brush.verticalGradient(
-                                        colors = listOf(Color(0xFF222123), Color(0xFF101011))
-                                    )
+                Box(
+                    modifier = if (isMaterialYou) {
+                        Modifier
+                            .size(72.dp)
+                            .clip(CircleShape)
+                            .background(Neutral1_800)
+                    } else {
+                        Modifier
+                            .size(72.dp)
+                            .clip(CircleShape)
+                            .background(
+                                Brush.verticalGradient(
+                                    colors = listOf(Color(0xFF222123), Color(0xFF101011))
                                 )
-                        },
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Icon(
-                            painter = painterResource(id = R.drawable.ic_sing),
-                            contentDescription = null,
-                            tint = if (isMaterialYou) Accent1_100 else Color.White,
-                            modifier = Modifier.size(42.dp)
-                        )
-                    }
-
-                    Spacer(modifier = Modifier.height(14.dp))
-
-                    Text(
-                        text = stringResource(id = R.string.app_name),
-                        color = TextPrimary,
-                        fontSize = 20.sp,
-                        fontWeight = FontWeight.Bold
+                            )
+                    },
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        painter = painterResource(id = R.drawable.ic_sing),
+                        contentDescription = null,
+                        tint = if (isMaterialYou) Accent1_100 else Color.White,
+                        modifier = Modifier.size(42.dp)
                     )
+                }
 
-                    Spacer(modifier = Modifier.height(4.dp))
+                Spacer(modifier = Modifier.height(14.dp))
 
+                Text(
+                    text = stringResource(id = R.string.app_name),
+                    color = TextPrimary,
+                    fontSize = 20.sp,
+                    fontWeight = FontWeight.Bold
+                )
+
+                Spacer(modifier = Modifier.height(4.dp))
+
+                Text(
+                    text = stringResource(id = R.string.info_app_subtitle),
+                    color = TextSecondary,
+                    fontSize = 12.5.sp,
+                    lineHeight = 16.sp
+                )
+
+                Spacer(modifier = Modifier.height(10.dp))
+
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(SurfaceContainerHigh)
+                        .clickable(onClick = onVersionClick)
+                        .padding(horizontal = 10.dp, vertical = 4.dp)
+                ) {
                     Text(
-                        text = stringResource(id = R.string.info_app_subtitle),
+                        text = appVersion,
                         color = TextSecondary,
-                        fontSize = 12.5.sp,
-                        lineHeight = 16.sp
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.SemiBold
                     )
-
-                    Spacer(modifier = Modifier.height(10.dp))
-
-                    Box(
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(8.dp))
-                            .background(SurfaceContainerHigh)
-                            .clickable(onClick = onVersionClick)
-                            .padding(horizontal = 10.dp, vertical = 4.dp)
-                    ) {
-                        Text(
-                            text = appVersion,
-                            color = TextSecondary,
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.SemiBold
-                        )
-                    }
                 }
             }
 
@@ -313,7 +307,10 @@ fun InfoScreen(
         ExpressiveCollapsingTopBar(
             progress = progress,
             title = stringResource(id = R.string.title_info),
-            navigationIcon = NavigationIcon.Back(onBack = onBack)
+            navigationIcon = NavigationIcon.Morphing(
+                icon = rememberVectorPainter(Icons.Outlined.Info),
+                onBack = onBack
+            )
         )
     }
 }
