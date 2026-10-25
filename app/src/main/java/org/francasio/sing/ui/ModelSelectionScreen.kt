@@ -1,17 +1,19 @@
 package org.francasio.sing.ui
 
+import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.Animatable
-import org.francasio.sing.ui.components.CollapsingTopBarDefaults
-import org.francasio.sing.ui.components.ExpressiveCollapsingTopBar
-import org.francasio.sing.ui.components.NavigationIcon
-import org.francasio.sing.ui.components.rememberCollapsingProgress
 import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -29,6 +31,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.outlined.Check
 import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.Info
@@ -43,14 +46,20 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearWavyProgressIndicator
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.RadioButtonDefaults
+import androidx.compose.material3.SecondaryTabRow
+import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInParent
@@ -65,6 +74,10 @@ import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.delay
 import org.francasio.sing.R
 import org.francasio.sing.provider.SingSettings
+import org.francasio.sing.ui.components.CollapsingTopBarDefaults
+import org.francasio.sing.ui.components.ExpressiveCollapsingTopBar
+import org.francasio.sing.ui.components.NavigationIcon
+import org.francasio.sing.ui.components.rememberCollapsingProgress
 import org.francasio.sing.ui.theme.*
 import org.francasio.sing.util.DeviceHelper
 import org.francasio.sing.util.ModelDownloader
@@ -261,13 +274,56 @@ private fun ModelGroupCard(
     highlightPulse: Float = 0f,
     onVersionSelect: (String) -> Unit
 ) {
+    val availableEngines = remember(modelDef.versions) {
+        modelDef.versions.map { it.engine.lowercase() }.distinct()
+    }
+    val selectedVersion = modelDef.versions.find { it.id == selectedModelId }
+    val recommendedVersion = modelDef.versions.find { it.isRecommended } ?: modelDef.versions.firstOrNull()
+
+    // Default to the tab containing the selected model (if belonging to this family)
+    // or the tab containing the recommended model
+    val initialEngine = remember(modelDef.id, selectedModelId) {
+        selectedVersion?.engine?.lowercase()
+            ?: recommendedVersion?.engine?.lowercase()
+            ?: availableEngines.firstOrNull()
+            ?: "onnx"
+    }
+
+    var currentEngine by remember(modelDef.id) { mutableStateOf(initialEngine) }
+
+    LaunchedEffect(selectedModelId) {
+        selectedVersion?.let {
+            currentEngine = it.engine.lowercase()
+        }
+    }
+
+    var isExpanded by remember { mutableStateOf(false) }
+    val hasMultipleVersions = modelDef.versions.size > 1
+
+    val displayedVersions = if (!isExpanded) {
+        listOfNotNull(selectedVersion ?: recommendedVersion)
+    } else if (availableEngines.size > 1) {
+        modelDef.versions.filter { it.engine.equals(currentEngine, ignoreCase = true) }
+    } else {
+        modelDef.versions
+    }
+
     Card(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(16.dp),
         colors = CardDefaults.cardColors(containerColor = CardDark),
         elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
     ) {
-        Column(modifier = Modifier.fillMaxWidth()) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .animateContentSize(
+                    animationSpec = spring(
+                        dampingRatio = Spring.DampingRatioMediumBouncy,
+                        stiffness = Spring.StiffnessMediumLow
+                    )
+                )
+        ) {
             // Model Header
             Column(
                 modifier = Modifier
@@ -295,15 +351,22 @@ private fun ModelGroupCard(
 
                 Spacer(modifier = Modifier.height(6.dp))
 
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
                     // Target Stem Badge: Instrumental preferred over Vocal
                     StatusBadge(
                         text = if (modelDef.isInstrumental) "Instrumental Output" else "Vocal Output",
                         isPreferred = modelDef.isInstrumental
                     )
+
+                    if (modelDef.keepsBackingVocals) {
+                        StatusBadge(
+                            text = stringResource(id = R.string.badge_keeps_backing_vocals),
+                            isPreferred = false
+                        )
+                    }
 
                     // Architecture Badge (Neutral)
                     Box(
@@ -313,11 +376,65 @@ private fun ModelGroupCard(
                             .padding(horizontal = 7.dp, vertical = 2.5.dp)
                     ) {
                         Text(
-                            text = if (modelDef.isTimeDomain) "Time-Domain" else "STFT (${modelDef.numBins} bins)",
+                            text = if (modelDef.isTimeDomain) "Time-Domain" else if (modelDef.isVr3Band) "VR 3-Band (769 bins)" else "STFT (${modelDef.numBins} bins)",
                             color = TextSecondary,
                             fontSize = 11.sp,
                             fontWeight = FontWeight.Medium
                         )
+                    }
+
+                    if (modelDef.vocalSdr != null) {
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(6.dp))
+                                .background(SurfaceContainerHigh)
+                                .padding(horizontal = 7.dp, vertical = 2.5.dp)
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                Icon(
+                                    painter = painterResource(id = R.drawable.ic_sing),
+                                    contentDescription = null,
+                                    tint = TextSecondary,
+                                    modifier = Modifier.size(13.dp)
+                                )
+                                Text(
+                                    text = "${String.format(java.util.Locale.US, "%.1f", modelDef.vocalSdr)} dB",
+                                    color = TextSecondary,
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Medium
+                                )
+                            }
+                        }
+                    }
+
+                    if (modelDef.instSdr != null) {
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(6.dp))
+                                .background(SurfaceContainerHigh)
+                                .padding(horizontal = 7.dp, vertical = 2.5.dp)
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                Icon(
+                                    painter = painterResource(id = R.drawable.ic_instrumental),
+                                    contentDescription = null,
+                                    tint = TextSecondary,
+                                    modifier = Modifier.size(13.dp)
+                                )
+                                Text(
+                                    text = "${String.format(java.util.Locale.US, "%.1f", modelDef.instSdr)} dB",
+                                    color = TextSecondary,
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Medium
+                                )
+                            }
+                        }
                     }
                 }
 
@@ -334,8 +451,46 @@ private fun ModelGroupCard(
 
             HorizontalDivider(color = DividerDark.copy(alpha = 0.5f), modifier = Modifier.fillMaxWidth())
 
+            if (isExpanded && availableEngines.size > 1) {
+                val selectedTabIndex = availableEngines.indexOf(currentEngine).coerceAtLeast(0)
+                SecondaryTabRow(
+                    selectedTabIndex = selectedTabIndex,
+                    modifier = Modifier.fillMaxWidth(),
+                    containerColor = Color.Transparent,
+                    contentColor = Primary,
+                    divider = {
+                        HorizontalDivider(
+                            color = DividerDark.copy(alpha = 0.5f),
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                    }
+                ) {
+                    availableEngines.forEachIndexed { index, engine ->
+                        val isTabSelected = (currentEngine == engine)
+                        Tab(
+                            selected = isTabSelected,
+                            onClick = { currentEngine = engine },
+                            text = {
+                                Text(
+                                    text = when (engine) {
+                                        "onnx" -> "ONNX"
+                                        "mnn" -> "MNN"
+                                        "native" -> "Native"
+                                        else -> engine.uppercase()
+                                    },
+                                    fontSize = 13.sp,
+                                    fontWeight = if (isTabSelected) FontWeight.Bold else FontWeight.Medium
+                                )
+                            },
+                            selectedContentColor = Primary,
+                            unselectedContentColor = TextSecondary
+                        )
+                    }
+                }
+            }
+
             // Model Versions
-            modelDef.versions.forEachIndexed { vIndex, version ->
+            displayedVersions.forEachIndexed { vIndex, version ->
                 val modelInfo = ModelLoader.findCatalogModel(version.id) ?: return@forEachIndexed
                 val isSelected = (version.id == selectedModelId)
 
@@ -346,10 +501,51 @@ private fun ModelGroupCard(
                     onSelect = { onVersionSelect(version.id) }
                 )
 
-                if (vIndex < modelDef.versions.size - 1) {
+                if (vIndex < displayedVersions.size - 1) {
                     HorizontalDivider(
                         color = DividerDark.copy(alpha = 0.4f),
                         modifier = Modifier.padding(horizontal = 18.dp)
+                    )
+                }
+            }
+
+            if (hasMultipleVersions) {
+                val arrowRotation by animateFloatAsState(
+                    targetValue = if (isExpanded) 180f else 0f,
+                    animationSpec = spring(
+                        dampingRatio = Spring.DampingRatioMediumBouncy,
+                        stiffness = Spring.StiffnessMediumLow
+                    ),
+                    label = "arrowRotation"
+                )
+
+                HorizontalDivider(
+                    color = DividerDark.copy(alpha = 0.4f),
+                    modifier = Modifier.fillMaxWidth()
+                )
+
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { isExpanded = !isExpanded }
+                        .padding(horizontal = 18.dp, vertical = 12.dp),
+                    horizontalArrangement = Arrangement.Center,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = stringResource(id = if (isExpanded) R.string.show_less else R.string.show_more),
+                        color = Primary,
+                        fontSize = 13.5.sp,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Icon(
+                        imageVector = Icons.Default.KeyboardArrowDown,
+                        contentDescription = null,
+                        tint = Primary,
+                        modifier = Modifier
+                            .size(18.dp)
+                            .rotate(arrowRotation)
                     )
                 }
             }

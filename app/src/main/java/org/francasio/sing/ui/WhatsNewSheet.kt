@@ -59,9 +59,10 @@ private data class WhatsNewFeature(val icon: Int, val title: Int, val descriptio
 
 private val releaseFeatures = listOf(
     WhatsNewFeature(R.drawable.ic_cloud_download, R.string.whats_new_title_1, R.string.whats_new_desc_1),
-    WhatsNewFeature(R.drawable.ic_lyrics_blur, R.string.whats_new_title_2, R.string.whats_new_desc_2),
-    WhatsNewFeature(R.drawable.ic_preserve_sides, R.string.whats_new_title_3, R.string.whats_new_desc_3),
-    WhatsNewFeature(R.drawable.ic_update_notice, R.string.whats_new_title_4, R.string.whats_new_desc_4)
+    WhatsNewFeature(R.drawable.ic_ai_models, R.string.whats_new_title_2, R.string.whats_new_desc_2),
+    WhatsNewFeature(R.drawable.ic_lyrics_blur, R.string.whats_new_title_3, R.string.whats_new_desc_3),
+    WhatsNewFeature(R.drawable.ic_preserve_sides, R.string.whats_new_title_4, R.string.whats_new_desc_4),
+    WhatsNewFeature(R.drawable.ic_update_notice, R.string.whats_new_title_5, R.string.whats_new_desc_5)
 )
 
 // Add minor change string IDs here in later releases; omit the disclosure when empty.

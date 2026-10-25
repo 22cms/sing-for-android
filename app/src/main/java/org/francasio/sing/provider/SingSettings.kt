@@ -310,6 +310,12 @@ object SingSettings {
                 putExtra("model_target_stem", modelInfo.targetStem)
                 putExtra("model_network_type", modelInfo.networkType)
                 putExtra("model_num_bins", modelInfo.numBins)
+                putExtra("model_num_frames", modelInfo.numFrames)
+                putExtra("model_fft_size", modelInfo.fftSize)
+                putExtra("model_hop_size", modelInfo.hopSize)
+                putExtra("model_chunk_samples", modelInfo.chunkSamples)
+                putExtra("model_crossfade_samples", modelInfo.crossfadeSamples)
+                putExtra("model_hop_samples", modelInfo.hopSamples)
                 putExtra("model_block_size", modelInfo.blockSize)
                 putExtra("model_lookahead_size", modelInfo.lookaheadSize)
                 putExtra("model_file_name", modelInfo.fileName)
@@ -487,15 +493,33 @@ object SingSettings {
         val engineFromApp = intent.getStringExtra("model_engine") ?: "onnx"
         val infoIsConsistent = !(engineFromApp == "native" &&
             sanitizeModelId(newModelId) != "apple_sing_native_fp32")
-        if (newModelId.isNotEmpty() && !modelFileName.isNullOrEmpty() && infoIsConsistent) {
+        val existingCatalogModel = org.francasio.sing.util.ModelLoader.findCatalogModel(newModelId)
+        if (existingCatalogModel != null) {
+            // Model is already well-defined in models.json catalog - do not overwrite with fallback defaults
+        } else if (newModelId.isNotEmpty() && !modelFileName.isNullOrEmpty() && infoIsConsistent) {
+            val netType = intent.getStringExtra("model_network_type") ?: "time_domain"
+            val isVr = netType.equals("vr_3band", ignoreCase = true) || netType.equals("vr", ignoreCase = true)
+            val defaultNumFrames = if (isVr) 512 else 256
+            val defaultNumBins = if (isVr) 769 else 2048
+            val defaultFftSize = if (isVr) 768 else 6144
+            val defaultHopSize = if (isVr) 512 else 1024
+            val defaultChunkSamples = if (isVr) 261632 else 261120
+            val defaultCrossfade = if (isVr) 0 else 44100
+            val defaultHopSamples = if (isVr) 131072 else 217020
             val mInfo = org.francasio.sing.util.ModelLoader.ModelInfo(
                 id = newModelId,
                 modelId = newModelId.substringBefore("_onnx").substringBefore("_litert").substringBefore("_mnn").substringBefore("_native"),
                 modelDisplayName = newModelId,
                 displayName = intent.getStringExtra("model_precision") ?: "FP16",
-                targetStem = intent.getStringExtra("model_target_stem") ?: "instrumental",
-                networkType = intent.getStringExtra("model_network_type") ?: "time_domain",
-                numBins = intent.getIntExtra("model_num_bins", 2048),
+                targetStem = intent.getStringExtra("model_target_stem") ?: "vocal",
+                networkType = netType,
+                numBins = intent.getIntExtra("model_num_bins", defaultNumBins),
+                numFrames = intent.getIntExtra("model_num_frames", defaultNumFrames),
+                fftSize = intent.getIntExtra("model_fft_size", defaultFftSize),
+                hopSize = intent.getIntExtra("model_hop_size", defaultHopSize),
+                chunkSamples = intent.getIntExtra("model_chunk_samples", defaultChunkSamples),
+                crossfadeSamples = intent.getIntExtra("model_crossfade_samples", defaultCrossfade),
+                hopSamples = intent.getIntExtra("model_hop_samples", defaultHopSamples),
                 blockSize = intent.getIntExtra("model_block_size", 4096),
                 lookaheadSize = intent.getIntExtra("model_lookahead_size", 16384),
                 engine = intent.getStringExtra("model_engine") ?: "onnx",

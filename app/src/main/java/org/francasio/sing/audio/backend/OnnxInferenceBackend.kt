@@ -49,8 +49,12 @@ class OnnxInferenceBackend(
     }
 
     // STFT fields
-    private val floatCount = 1 * 4 * numBins * StftEngine.N_FRAMES
-    private val stftShape = longArrayOf(1, 4, numBins.toLong(), StftEngine.N_FRAMES.toLong())
+    private val isVr = modelInfo.isVr3Band
+    private val stftChannels = if (isVr) 2 else 4
+    private val stftFrames = if (isVr) (if (modelInfo.numFrames > 256) modelInfo.numFrames else 512) else StftEngine.N_FRAMES
+    private val vrNumBins = if (isVr && numBins <= 0) 769 else numBins
+    private val floatCount = 1 * stftChannels * vrNumBins * stftFrames
+    private val stftShape = longArrayOf(1, stftChannels.toLong(), vrNumBins.toLong(), stftFrames.toLong())
     private val stftShortBufferIn: ShortBuffer? = if (isInputFp16) {
         ByteBuffer.allocateDirect(floatCount * 2).order(ByteOrder.nativeOrder()).asShortBuffer()
     } else null
@@ -185,13 +189,22 @@ class OnnxInferenceBackend(
             val result = session.run(mapOf(inputName to inputTensor))
             try {
                 val outputTensor = result.get(0) as OnnxTensor
+                val outFloatCount = if (isVr) {
+                    val roiFrames = if (stftFrames > 256) stftFrames - 256 else 256
+                    1 * 2 * vrNumBins * roiFrames
+                } else {
+                    floatCount
+                }
                 if (isOutputFp16) {
                     val sb = outputTensor.shortBuffer
-                    for (i in 0 until floatCount) {
+                    sb.rewind()
+                    for (i in 0 until outFloatCount) {
                         vocalOutput[i] = Half.toFloat(sb.get(i))
                     }
                 } else {
-                    outputTensor.floatBuffer.get(vocalOutput, 0, floatCount)
+                    val fb = outputTensor.floatBuffer
+                    fb.rewind()
+                    fb.get(vocalOutput, 0, outFloatCount)
                 }
             } finally {
                 result.close()

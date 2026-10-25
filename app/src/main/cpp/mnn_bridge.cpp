@@ -16,6 +16,20 @@
 static bool testSession(MNN::Interpreter* interp, MNN::Session* sess) {
     if (!interp || !sess) return false;
     try {
+        auto* in = interp->getSessionInput(sess, nullptr);
+        if (in) {
+            auto dims = in->shape();
+            bool hasDynamic = false;
+            for (int d : dims) if (d <= 0) hasDynamic = true;
+            if (hasDynamic && dims.size() == 4) {
+                int b = dims[0] > 0 ? dims[0] : 1;
+                int c = dims[1] > 0 ? dims[1] : 2;
+                int f = dims[2] > 0 ? dims[2] : 769;
+                dims = {b, c, f, 512};
+                interp->resizeTensor(in, dims);
+                interp->resizeSession(sess);
+            }
+        }
         int rc = interp->runSession(sess);
         if (rc != 0) {
             MLOG("MNN test run failed with rc=%d", rc);
@@ -334,6 +348,21 @@ Java_org_francasio_sing_audio_backend_MnnInferenceBackend_nativeCreate(
     h->input = h->interp->getSessionInput(h->sess, nullptr);
     h->output = h->interp->getSessionOutput(h->sess, nullptr);
     h->inDims = h->input->shape();
+
+    bool hasDynamic = false;
+    for (int d : h->inDims) {
+        if (d <= 0) { hasDynamic = true; break; }
+    }
+    if (hasDynamic && h->inDims.size() == 4) {
+        int b = h->inDims[0] > 0 ? h->inDims[0] : 1;
+        int c = h->inDims[1] > 0 ? h->inDims[1] : 2;
+        int f = h->inDims[2] > 0 ? h->inDims[2] : 769;
+        std::vector<int> targetDims = {b, c, f, 512};
+        h->inDims = targetDims;
+        h->interp->resizeTensor(h->input, targetDims);
+        h->interp->resizeSession(h->sess);
+        MLOG("MNN resized dynamic input to {%d, %d, %d, 512}", b, c, f);
+    }
     h->outDims = h->output->shape();
 
     MLOG("MNN engine created: backend=%s threads=%d in=%zu out=%zu", h->backendTag.c_str(), h->threads, h->inDims.size(), h->outDims.size());
@@ -345,6 +374,27 @@ Java_org_francasio_sing_audio_backend_MnnInferenceBackend_nativeRun(
     JNIEnv* env, jobject thiz, jlong handle, jfloatArray jin, jfloatArray jout) {
     auto* h = (MnnHandle*)(intptr_t)handle;
     if (!h || !h->input || !h->output) return JNI_FALSE;
+
+    jsize inLen = env->GetArrayLength(jin);
+    bool hasDynamic = false;
+    for (int d : h->inDims) {
+        if (d <= 0) { hasDynamic = true; break; }
+    }
+    if (hasDynamic && h->inDims.size() == 4) {
+        int b = h->inDims[0] > 0 ? h->inDims[0] : 1;
+        int c = h->inDims[1] > 0 ? h->inDims[1] : 2;
+        int f = h->inDims[2] > 0 ? h->inDims[2] : 769;
+        int t = inLen / (b * c * f);
+        if (t <= 0) t = 512;
+        std::vector<int> targetDims = {b, c, f, t};
+        if (h->inDims != targetDims) {
+            h->inDims = targetDims;
+            h->interp->resizeTensor(h->input, targetDims);
+            h->interp->resizeSession(h->sess);
+            h->outDims = h->output->shape();
+        }
+    }
+
     size_t inN = 1; for (int d : h->inDims) inN *= d;
     size_t outN = 1; for (int d : h->outDims) outN *= d;
     jfloat* src = env->GetFloatArrayElements(jin, nullptr);

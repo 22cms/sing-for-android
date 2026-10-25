@@ -23,7 +23,8 @@ fun SingSettingsCard(
     onTwoWaySliderChange: (Boolean) -> Unit,
     onAllowZeroFloorChange: (Boolean) -> Unit,
     onForceSongEligibilityChange: (Boolean) -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    canPreserveSide: Boolean = true
 ) {
     GroupedSection(
         title = stringResource(id = R.string.title_sing_settings),
@@ -33,9 +34,14 @@ fun SingSettingsCard(
             SettingSwitchRow(
                 icon = painterResource(id = R.drawable.ic_preserve_sides),
                 title = stringResource(id = R.string.setting_preserve_side_title),
-                description = stringResource(id = R.string.desc_preserve_side),
-                checked = preserveSide,
-                onCheckedChange = onPreserveSideChange
+                description = if (canPreserveSide) {
+                    stringResource(id = R.string.desc_preserve_side)
+                } else {
+                    stringResource(id = R.string.desc_preserve_side_disabled)
+                },
+                checked = preserveSide && canPreserveSide,
+                onCheckedChange = onPreserveSideChange,
+                enabled = canPreserveSide
             )
         }
         item {

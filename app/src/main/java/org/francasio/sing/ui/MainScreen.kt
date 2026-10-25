@@ -59,6 +59,7 @@ fun MainScreen(
     moduleVersion: String = "",
     xposedManagerInfo: String = "",
     preserveSide: Boolean,
+    canPreserveSide: Boolean = true,
     twoWaySlider: Boolean,
     allowZeroFloor: Boolean,
     forceSongEligibility: Boolean,
@@ -154,6 +155,7 @@ fun MainScreen(
             // 3. Sing Settings Section
             SingSettingsCard(
                 preserveSide = preserveSide,
+                canPreserveSide = canPreserveSide,
                 twoWaySlider = twoWaySlider,
                 allowZeroFloor = allowZeroFloor,
                 forceSongEligibility = forceSongEligibility,

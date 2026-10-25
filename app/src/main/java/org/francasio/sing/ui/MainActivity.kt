@@ -250,6 +250,9 @@ class MainActivity : ComponentActivity() {
                 }
 
                 Box(modifier = Modifier.fillMaxSize()) {
+                    val activeModelInfo = ModelLoader.findCatalogModel(selectedModelId)
+                    val canPreserveSide = activeModelInfo?.keepsBackingVocals != true
+
                     MainScreen(
                         isModuleLoaded = isModuleLoaded,
                         isModuleVersionMismatch = isModuleVersionMismatch,
@@ -257,6 +260,7 @@ class MainActivity : ComponentActivity() {
                         moduleVersion = moduleVersion,
                         xposedManagerInfo = xposedManagerInfo,
                         preserveSide = preserveSide,
+                        canPreserveSide = canPreserveSide,
                         twoWaySlider = twoWaySlider,
                         allowZeroFloor = allowZeroFloor,
                         forceSongEligibility = forceSongEligibility,

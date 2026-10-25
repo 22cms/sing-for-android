@@ -32,6 +32,7 @@ class AiStemSeparationEngine(
     }
 
     private val stftEngine = StftEngine()
+    private val vrDspEngine = VrDspEngine()
 
     // Circular ring buffers (stereo interleaved: 2 floats per frame)
     private val inRing = FloatArray(RING_SIZE * 2)
@@ -52,6 +53,13 @@ class AiStemSeparationEngine(
     private val chunkVocalPcm = FloatArray(CHUNK_SAMPLES * 2)
     private val chunkCenterPcm = FloatArray(CHUNK_SAMPLES * 2)
     private val chunkRawVocalPcm = FloatArray(CHUNK_SAMPLES * 2)
+
+    // Dedicated VR 3-band worker buffers
+    private val vrChunkInPcm = FloatArray(512 * 512 * 2)
+    private val vrInputTensor = FloatArray(2 * VrDspEngine.VR_TOTAL_BINS * 512)
+    private val vrOutputTensor = FloatArray(2 * VrDspEngine.VR_TOTAL_BINS * 256)
+    private val vrVocalPcm = FloatArray(256 * 512 * 2)
+    private val vrCenterPcm = FloatArray(256 * 512 * 2)
 
     // Dedicated Time-domain worker buffers (Apple Sing Vi-NNet)
     private val timeDomainInPcm = FloatArray(4096 * 2)
@@ -94,6 +102,8 @@ class AiStemSeparationEngine(
             }
             field = value
         }
+    val isPreserveSideActive: Boolean
+        get() = preserveSide && !currentBackend.modelInfo.keepsBackingVocals
     @Volatile var twoWaySlider: Boolean = false
     @Volatile var ecoMode: Boolean = true
         set(value) {
@@ -110,6 +120,9 @@ class AiStemSeparationEngine(
 
     val isTimeDomain: Boolean
         get() = currentBackend.modelInfo.isTimeDomain
+
+    val isVr3Band: Boolean
+        get() = currentBackend.modelInfo.isVr3Band
 
     val isInstrumental: Boolean
         get() = currentBackend.modelInfo.isInstrumental
@@ -214,18 +227,31 @@ class AiStemSeparationEngine(
         get() = if (active) maxOf(0L, inWriteFrames - vocalReadFrames) else 0L
 
     val needsInitialChunkBurst: Boolean
-        get() = if (isTimeDomain) {
-            val needed = currentBackend.modelInfo.lookaheadSize + currentBackend.modelInfo.blockSize
-            active && vocalWriteFrames == 0L && ((inWriteFrames - inProcessedFrames) < needed)
-        } else {
-            active && vocalWriteFrames == 0L && ((inWriteFrames - inProcessedFrames) < CHUNK_SAMPLES)
+        get() = when {
+            isTimeDomain -> {
+                val needed = currentBackend.modelInfo.lookaheadSize + currentBackend.modelInfo.blockSize
+                active && vocalWriteFrames == 0L && ((inWriteFrames - inProcessedFrames) < needed)
+            }
+            isVr3Band -> {
+                val needed = vrDspEngine.chunkSamples
+                active && vocalWriteFrames == 0L && ((inWriteFrames - inProcessedFrames) < needed)
+            }
+            else -> {
+                active && vocalWriteFrames == 0L && ((inWriteFrames - inProcessedFrames) < CHUNK_SAMPLES)
+            }
         }
 
     val hasInitialChunkGathered: Boolean
-        get() = if (isTimeDomain) {
-            active && ((inWriteFrames - inProcessedFrames) >= currentBackend.modelInfo.blockSize)
-        } else {
-            active && ((inWriteFrames - inProcessedFrames) >= CHUNK_SAMPLES)
+        get() = when {
+            isTimeDomain -> {
+                active && ((inWriteFrames - inProcessedFrames) >= currentBackend.modelInfo.blockSize)
+            }
+            isVr3Band -> {
+                active && ((inWriteFrames - inProcessedFrames) >= vrDspEngine.chunkSamples)
+            }
+            else -> {
+                active && ((inWriteFrames - inProcessedFrames) >= CHUNK_SAMPLES)
+            }
         }
 
     /**
@@ -235,10 +261,10 @@ class AiStemSeparationEngine(
         if (!active) return true
 
         if (vocalWriteFrames == 0L) {
-            val initialTarget = if (isTimeDomain) {
-                currentBackend.modelInfo.lookaheadSize + 2 * currentBackend.modelInfo.blockSize
-            } else {
-                PRE_ROLL_FRAMES
+            val initialTarget = when {
+                isTimeDomain -> currentBackend.modelInfo.lookaheadSize + 2 * currentBackend.modelInfo.blockSize
+                isVr3Band -> vrDspEngine.chunkSamples + vrDspEngine.roiSamples
+                else -> PRE_ROLL_FRAMES
             }
             return (inWriteFrames + frameCount) <= (initialTarget + 4096)
         }
@@ -300,7 +326,7 @@ class AiStemSeparationEngine(
         val toBlend = minOf(frameCount, maxOf(0, availableVocal))
         var rp = vocalReadFrames
 
-        val isPreserveSide = preserveSide
+        val isPreserveSide = isPreserveSideActive
         val isTwoWay = twoWaySlider
         val isInst = isInstrumental
 
@@ -507,7 +533,7 @@ class AiStemSeparationEngine(
                         Log.d(TAG, "Time-domain NN: $tmBlocks blocks, avg ${tmTotalMs / tmBlocks} ms, min $tmMinMs ms, max $tmMaxMs ms (budget 92.9 ms/block, ${currentBackend.providerName})")
                     }
 
-                    val makeCenter = preserveSide
+                    val makeCenter = isPreserveSideActive
                     if (makeCenter) {
                         for (i in 0 until blockSize) {
                             val framePos = startFrame - lookaheadSize + i
@@ -553,7 +579,7 @@ class AiStemSeparationEngine(
                                 }
                             }
 
-                            if (makeCenter && preserveSide && pendingStartFrame != Long.MIN_VALUE && pendingStartFrame + blockSize > 0) {
+                            if (makeCenter && isPreserveSideActive && pendingStartFrame != Long.MIN_VALUE && pendingStartFrame + blockSize > 0) {
                                 val centerStart = maxOf(0L, pendingStartFrame)
                                 val centerEnd = minOf(inWriteFrames, pendingStartFrame + blockSize)
                                 for (frame in centerStart until centerEnd) {
@@ -566,7 +592,7 @@ class AiStemSeparationEngine(
                                 centerEndFrame = centerEnd
                             }
 
-                            if (makeCenter && preserveSide) {
+                            if (makeCenter && isPreserveSideActive) {
                                 if (pendingStartFrame != Long.MIN_VALUE) {
                                     System.arraycopy(pendingVocalPcm, 0, previousVocalPcm, 0, blockSize * 2)
                                     hasPreviousVocal = true
@@ -577,7 +603,7 @@ class AiStemSeparationEngine(
                             }
 
                             if (targetEnd > 0) {
-                                val readyEnd = if (makeCenter && preserveSide) centerEndFrame else targetEnd
+                                val readyEnd = if (makeCenter && isPreserveSideActive) centerEndFrame else targetEnd
                                 vocalWriteFrames = maxOf(vocalWriteFrames, minOf(inWriteFrames, readyEnd))
                             }
 
@@ -608,6 +634,121 @@ class AiStemSeparationEngine(
                     if (isStale) continue
                 } catch (e: Throwable) {
                     Log.e(TAG, "Time-domain inference error: ${e.message}", e)
+                }
+
+            } else if (isVr3Band) {
+                // VR 3-band architecture inference (12_SP-UVR-3B-44100, etc.)
+                var myGen = 0L
+                var destFrame = 0L
+                val chunkSamples = vrDspEngine.chunkSamples
+                val roiSamples = vrDspEngine.roiSamples
+                val offsetSamples = VrDspEngine.OFFSET_FRAMES * 512L
+
+                lock.withLock {
+                    while (running && (!active || (
+                        (inWriteFrames - inProcessedFrames) < (chunkSamples - offsetSamples) && !endOfStreamSignaled
+                    ))) {
+                        try {
+                            workCond.await()
+                        } catch (e: InterruptedException) {
+                            return
+                        }
+                    }
+                    if (!running || !active) return@withLock
+                    if (endOfStreamSignaled && inProcessedFrames >= inWriteFrames) return@withLock
+
+                    myGen = seekGeneration.get()
+                    destFrame = inProcessedFrames
+                    val chunkStartFrame = destFrame - offsetSamples
+
+                    for (i in 0 until chunkSamples * 2) {
+                        val sampleOffset = (i / 2).toLong()
+                        val ch = i and 1
+                        val framePos = chunkStartFrame + sampleOffset
+                        val srcSample = if (framePos < 0) {
+                            val srcFrame = -framePos
+                            val idx = (((srcFrame * 2 + ch) and (RING_MASK * 2 + 1).toLong())).toInt()
+                            inRing[idx]
+                        } else if (framePos >= inWriteFrames) {
+                            0.0f
+                        } else {
+                            val idx = (((framePos * 2 + ch) and (RING_MASK * 2 + 1).toLong())).toInt()
+                            inRing[idx]
+                        }
+                        vrChunkInPcm[i] = srcSample
+                    }
+                    inProcessedFrames = destFrame + roiSamples
+                }
+
+                if (!running || !active) continue
+
+                try {
+                    val t0 = System.currentTimeMillis()
+                    vrDspEngine.forward(vrChunkInPcm, vrInputTensor)
+                    val tDspFwd = System.currentTimeMillis()
+
+                    currentBackend.run(vrInputTensor, vrOutputTensor)
+                    val tInf = System.currentTimeMillis()
+
+                    // Extract vocal stem directly
+                    vrDspEngine.inverse(vrOutputTensor, vrVocalPcm, isInstrumental = false)
+                    val makeCenter = isPreserveSideActive
+                    if (makeCenter) {
+                        stftEngine.centerCutPcm(vrVocalPcm, vrCenterPcm, roiSamples)
+                    }
+                    val t1 = System.currentTimeMillis()
+                    Log.d(TAG, "VR 3-band chunk separated in ${t1 - t0} ms [fwd=${tDspFwd - t0}ms, nn=${tInf - tDspFwd}ms, inv=${t1 - tInf}ms] (roi: ${roiSamples / 44100.0}s, provider: ${currentBackend.providerName})")
+
+                    var isStale = false
+                    lock.withLock {
+                        if (!running || !active || myGen != seekGeneration.get()) {
+                            isStale = true
+                        } else {
+                            val targetEnd = destFrame + roiSamples
+
+                            for (i in 0 until roiSamples) {
+                                val framePos = destFrame + i
+                                if (framePos in 0 until inWriteFrames) {
+                                    val idx = ((framePos * 2) and (RING_MASK * 2 + 1).toLong()).toInt()
+                                    val sL = vrVocalPcm[i * 2]
+                                    val sR = vrVocalPcm[i * 2 + 1]
+                                    vocalRing[idx] = if (sL.isNaN() || sL.isInfinite()) 0.0f else sL
+                                    vocalRing[idx + 1] = if (sR.isNaN() || sR.isInfinite()) 0.0f else sR
+                                    if (makeCenter && isPreserveSideActive) {
+                                        centerRing[idx] = vrCenterPcm[i * 2]
+                                        centerRing[idx + 1] = vrCenterPcm[i * 2 + 1]
+                                    }
+                                }
+                            }
+                            if (makeCenter && isPreserveSideActive) {
+                                centerStartFrame = destFrame
+                                centerEndFrame = targetEnd
+                            }
+
+                            vocalWriteFrames = maxOf(vocalWriteFrames, minOf(inWriteFrames, targetEnd))
+                            workCond.signalAll()
+
+                            // Thermal pacing
+                            val curCushion = maxOf(0L, vocalWriteFrames - vocalReadFrames)
+                            val targetCushion = 131072L // ~3.0s target cushion
+                            if (ecoMode && !endOfStreamSignaled && curCushion > targetCushion) {
+                                while (running && active && ecoMode && !endOfStreamSignaled && myGen == seekGeneration.get()) {
+                                    val cushion = maxOf(0L, vocalWriteFrames - vocalReadFrames)
+                                    if (cushion <= targetCushion) break
+                                    val excessFrames = cushion - targetCushion
+                                    val waitMs = minOf(300L, maxOf(20L, (excessFrames * 1000L) / 44100L))
+                                    try {
+                                        pacingCond.await(waitMs, java.util.concurrent.TimeUnit.MILLISECONDS)
+                                    } catch (e: InterruptedException) {
+                                        return
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    if (isStale) continue
+                } catch (e: Throwable) {
+                    Log.e(TAG, "VR separation error: ${e.message}", e)
                 }
 
             } else {
@@ -662,7 +803,7 @@ class AiStemSeparationEngine(
                     currentBackend.run(chunkStftTensor, chunkVocalTensor)
                     val tInf = System.currentTimeMillis()
 
-                    val makeCenter = preserveSide
+                    val makeCenter = isPreserveSideActive
                     if (makeCenter && !isInstrumental) {
                         // The NN already produced a vocal spectrum: reuse its STFT
                         // rather than transforming the vocal PCM a second time.
@@ -686,7 +827,7 @@ class AiStemSeparationEngine(
                             isStale = true
                         } else {
                             writeVocalWithOverlapAdd(chunkVocalPcm, startFrame)
-                            if (makeCenter && preserveSide) {
+                            if (makeCenter && isPreserveSideActive) {
                                 writeCenterWithOverlapAdd(chunkCenterPcm, startFrame)
                             }
                             workCond.signalAll()

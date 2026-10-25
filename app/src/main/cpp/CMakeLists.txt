@@ -31,6 +31,7 @@ add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/../../../../extern/kissfft ${CMAKE_
 add_library(sing_dsp SHARED
     stft_engine.cpp
     sinc_resampler.cpp
+    vr_dsp_engine.cpp
     jni_bridge.cpp
     vinet_jni.cpp
     ${MNN_BRIDGE}

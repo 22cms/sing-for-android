@@ -3,6 +3,7 @@
 #include <vector>
 #include "stft_engine.h"
 #include "sinc_resampler.h"
+#include "vr_dsp_engine.h"
 
 extern "C" {
 
@@ -111,6 +112,57 @@ Java_org_francasio_sing_audio_StftEngine_nativeResamplerDestroy(
         JNIEnv* /*env*/, jclass /*clazz*/, jlong handle) {
     auto* resampler = reinterpret_cast<sing::SincResampler*>(handle);
     delete resampler;
+}
+
+// VrDspEngine JNI Bindings
+
+JNIEXPORT jlong JNICALL
+Java_org_francasio_sing_audio_VrDspEngine_nativeInit(JNIEnv* /*env*/, jobject /*thiz*/, jint windowFrames) {
+    auto* engine = new sing::VrDspEngine(windowFrames);
+    return reinterpret_cast<jlong>(engine);
+}
+
+JNIEXPORT void JNICALL
+Java_org_francasio_sing_audio_VrDspEngine_nativeDestroy(JNIEnv* /*env*/, jobject /*thiz*/, jlong handle) {
+    auto* engine = reinterpret_cast<sing::VrDspEngine*>(handle);
+    delete engine;
+}
+
+JNIEXPORT void JNICALL
+Java_org_francasio_sing_audio_VrDspEngine_nativeSetWindowFrames(
+        JNIEnv* /*env*/, jobject /*thiz*/, jlong handle, jint windowFrames) {
+    auto* engine = reinterpret_cast<sing::VrDspEngine*>(handle);
+    if (engine) engine->setWindowFrames(windowFrames);
+}
+
+JNIEXPORT void JNICALL
+Java_org_francasio_sing_audio_VrDspEngine_nativeForward(
+        JNIEnv* env, jobject /*thiz*/, jlong handle, jfloatArray stereoPcm, jfloatArray outTensor) {
+    auto* engine = reinterpret_cast<sing::VrDspEngine*>(handle);
+    if (!engine) return;
+
+    jfloat* pcm_ptr = env->GetFloatArrayElements(stereoPcm, nullptr);
+    jfloat* tensor_ptr = env->GetFloatArrayElements(outTensor, nullptr);
+
+    engine->forward(pcm_ptr, tensor_ptr);
+
+    env->ReleaseFloatArrayElements(stereoPcm, pcm_ptr, JNI_ABORT);
+    env->ReleaseFloatArrayElements(outTensor, tensor_ptr, 0);
+}
+
+JNIEXPORT void JNICALL
+Java_org_francasio_sing_audio_VrDspEngine_nativeInverse(
+        JNIEnv* env, jobject /*thiz*/, jlong handle, jfloatArray inMaskTensor, jfloatArray outStereoPcm, jboolean isInstrumental) {
+    auto* engine = reinterpret_cast<sing::VrDspEngine*>(handle);
+    if (!engine) return;
+
+    jfloat* tensor_ptr = env->GetFloatArrayElements(inMaskTensor, nullptr);
+    jfloat* pcm_ptr = env->GetFloatArrayElements(outStereoPcm, nullptr);
+
+    engine->inverse(tensor_ptr, pcm_ptr, isInstrumental);
+
+    env->ReleaseFloatArrayElements(inMaskTensor, tensor_ptr, JNI_ABORT);
+    env->ReleaseFloatArrayElements(outStereoPcm, pcm_ptr, 0);
 }
 
 } // extern "C"

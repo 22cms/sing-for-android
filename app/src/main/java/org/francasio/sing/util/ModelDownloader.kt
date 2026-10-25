@@ -110,7 +110,7 @@ object ModelDownloader {
 
         val appContext = context.applicationContext ?: context
         downloadStates[model.id] = DownloadState.Downloading(0f, 0L, 0L)
-        val candidateUrls = ModelLoader.getModelDownloadUrls(appContext, model.fileName)
+        val candidateUrls = ModelLoader.getModelDownloadUrls(appContext, model.fileName, model.downloadUrl)
         Log.i(TAG, "Starting download for ${model.id}, candidate URLs: $candidateUrls")
 
         executor.execute {

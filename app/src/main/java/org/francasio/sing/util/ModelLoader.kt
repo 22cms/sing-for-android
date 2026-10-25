@@ -15,6 +15,7 @@ import org.francasio.sing.audio.backend.InferenceBackend
 import org.francasio.sing.audio.backend.NativeInferenceBackend
 import org.francasio.sing.audio.backend.MnnInferenceBackend
 import org.francasio.sing.audio.backend.OnnxBackendFactory
+import org.francasio.sing.provider.ENGINE_VERSION
 import org.francasio.sing.provider.SingSettings
 import org.json.JSONObject
 import java.util.concurrent.Executors
@@ -57,19 +58,19 @@ object ModelLoader {
         }
     }
 
-    fun getModelDownloadUrls(context: Context?, fileName: String): List<String> {
+    fun getModelDownloadUrls(context: Context?, fileName: String, customUrl: String? = null): List<String> {
         val isDebug = SingSettings.isDebug(context)
+        val custom = if (!customUrl.isNullOrBlank()) listOf(customUrl) else emptyList()
         return if (isDebug) {
             listOf(
                 "http://127.0.0.1:18200/$fileName",
                 "http://localhost:18200/$fileName",
-                "http://192.168.1.31:18200/$fileName",
-                "http://192.168.240.1:18200/$fileName",
-                "http://10.0.2.2:18200/$fileName",
-                "$HUGGINGFACE_MODELS_BASE_URL/$fileName"
-            )
+                "http://192.168.1.31:18200/$fileName",  // laptop LAN IP
+                "http://192.168.240.1:18200/$fileName", // Waydroid host gateway
+                "http://10.0.2.2:18200/$fileName"       // Standard Android emulator host
+            ) + custom + listOf("$HUGGINGFACE_MODELS_BASE_URL/$fileName")
         } else {
-            listOf("$HUGGINGFACE_MODELS_BASE_URL/$fileName")
+            custom + listOf("$HUGGINGFACE_MODELS_BASE_URL/$fileName")
         }
     }
 
@@ -93,12 +94,17 @@ object ModelLoader {
         val chunkSamples: Int = 261120,
         val crossfadeSamples: Int = 44100,
         val hopSamples: Int = 217020,
+        val vocalSdr: Double? = null,
+        val instSdr: Double? = null,
         val description: String = "",
         val isDefault: Boolean = false,
-        val versions: List<ModelVersion> = emptyList()
+        val versions: List<ModelVersion> = emptyList(),
+        val minVersion: String? = null,
+        val keepsBackingVocals: Boolean = false
     ) {
         val isInstrumental: Boolean get() = targetStem.equals("instrumental", ignoreCase = true)
         val isTimeDomain: Boolean get() = networkType.equals("time_domain", ignoreCase = true)
+        val isVr3Band: Boolean get() = networkType.equals("vr_3band", ignoreCase = true) || networkType.equals("vr", ignoreCase = true)
     }
 
     data class ModelVersion(
@@ -109,7 +115,10 @@ object ModelLoader {
         val fileName: String,
         val fileSizeDesc: String,
         val isRecommended: Boolean = false,
-        val description: String = ""
+        val description: String = "",
+        val minVersion: String? = null,
+        val downloadUrl: String? = null,
+        val keepsBackingVocals: Boolean = false
     )
 
     data class ModelInfo(
@@ -129,16 +138,22 @@ object ModelLoader {
         val chunkSamples: Int = 261120,
         val crossfadeSamples: Int = 44100,
         val hopSamples: Int = 217020,
+        val vocalSdr: Double? = null,
+        val instSdr: Double? = null,
         val engine: String = SingSettings.ENGINE_ONNX,
         val precision: String = "FP16",
         val fileName: String,
         val fileSizeDesc: String,
         val description: String = "",
         val isRecommended: Boolean = false,
-        val isSupported: Boolean = true
+        val isSupported: Boolean = true,
+        val minVersion: String? = null,
+        val downloadUrl: String? = null,
+        val keepsBackingVocals: Boolean = false
     ) {
         val isInstrumental: Boolean get() = targetStem.equals("instrumental", ignoreCase = true)
         val isTimeDomain: Boolean get() = networkType.equals("time_domain", ignoreCase = true)
+        val isVr3Band: Boolean get() = networkType.equals("vr_3band", ignoreCase = true) || networkType.equals("vr", ignoreCase = true)
         val isViNNet: Boolean get() = engine.equals(SingSettings.ENGINE_NATIVE, ignoreCase = true) || modelId == "apple_sing"
         val isOnnx: Boolean get() = engine.equals(SingSettings.ENGINE_ONNX, ignoreCase = true)
         val isMnn: Boolean get() = engine.equals(SingSettings.ENGINE_MNN, ignoreCase = true)
@@ -191,6 +206,8 @@ object ModelLoader {
                 put("fileSizeDesc", info.fileSizeDesc)
                 put("description", info.description)
                 put("isRecommended", info.isRecommended)
+                put("downloadUrl", info.downloadUrl ?: "")
+                put("keepsBackingVocals", info.keepsBackingVocals)
             }
             File(context.filesDir, SELECTED_MODEL_FILE).writeText(json.toString())
             registerDynamicModel(info)
@@ -206,6 +223,11 @@ object ModelLoader {
         return try {
             val str = file.readText()
             val obj = JSONObject(str)
+            val id = obj.optString("id", "")
+            val catalogModel = findCatalogModel(id)
+            if (catalogModel != null) {
+                return catalogModel
+            }
             val engine = obj.optString("engine", SingSettings.ENGINE_ONNX)
             // Keep the cached selection even if ONNX native libs are not downloaded
             // yet; they will be fetched on demand when the backend is created.
@@ -235,7 +257,9 @@ object ModelLoader {
                 fileSizeDesc = obj.optString("fileSizeDesc", ""),
                 description = obj.optString("description", ""),
                 isRecommended = isRecommended,
-                isSupported = true
+                isSupported = true,
+                downloadUrl = obj.optString("downloadUrl", "").ifBlank { null },
+                keepsBackingVocals = obj.optBoolean("keepsBackingVocals", false)
             )
             registerDynamicModel(info)
             info
@@ -283,7 +307,29 @@ object ModelLoader {
         }
     }
 
-    fun parseModelsJson(jsonStr: String): Pair<List<ModelDefinition>, List<ModelInfo>> {
+    /**
+     * Returns true if [current] semantic version is greater than or equal to [required].
+     * e.g. isVersionAtLeast("1.1", "1.1") -> true, isVersionAtLeast("1.0", "1.1") -> false
+     */
+    fun isVersionAtLeast(current: String, required: String): Boolean {
+        val cleanReq = required.trimStart('v', 'V').trim()
+        if (cleanReq.isEmpty()) return true
+        val cleanCur = current.trimStart('v', 'V').trim()
+        if (cleanCur.isEmpty()) return false
+
+        val curParts = cleanCur.split(".").map { it.toIntOrNull() ?: 0 }
+        val reqParts = cleanReq.split(".").map { it.toIntOrNull() ?: 0 }
+        val maxLen = maxOf(curParts.size, reqParts.size)
+        for (i in 0 until maxLen) {
+            val c = curParts.getOrElse(i) { 0 }
+            val r = reqParts.getOrElse(i) { 0 }
+            if (c < r) return false
+            if (c > r) return true
+        }
+        return true
+    }
+
+    fun parseModelsJson(jsonStr: String, appVersion: String = ENGINE_VERSION): Pair<List<ModelDefinition>, List<ModelInfo>> {
         val root = JSONObject(jsonStr)
         val modelsArray = root.getJSONArray("models")
         val defs = mutableListOf<ModelDefinition>()
@@ -292,6 +338,12 @@ object ModelLoader {
         for (i in 0 until modelsArray.length()) {
             val mObj = modelsArray.getJSONObject(i)
             val mId = mObj.getString("id")
+            val modelMinVersion = mObj.optString("minVersion", mObj.optString("minAppVersion", "")).ifBlank { null }
+            if (modelMinVersion != null && !isVersionAtLeast(appVersion, modelMinVersion)) {
+                Log.d(TAG, "Skipping model $mId: requires version >= $modelMinVersion, current is $appVersion")
+                continue
+            }
+
             val mDisplayName = mObj.getString("displayName")
             val targetStem = mObj.optString("targetStem", "vocal")
             val networkType = mObj.optString("networkType", "stft")
@@ -305,8 +357,11 @@ object ModelLoader {
             val chunkSamples = mObj.optInt("chunkSamples", 261120)
             val crossfadeSamples = mObj.optInt("crossfadeSamples", 44100)
             val hopSamples = mObj.optInt("hopSamples", 217020)
+            val vocalSdr = if (mObj.has("vocalSdr")) mObj.optDouble("vocalSdr") else null
+            val instSdr = if (mObj.has("instSdr")) mObj.optDouble("instSdr") else null
             val description = mObj.optString("description", "")
             val isDefault = mObj.optBoolean("isDefault", false)
+            val keepsBackingVocals = mObj.optBoolean("keepsBackingVocals", mObj.optBoolean("isKaraoke", mObj.optBoolean("disablePreserveSide", false)))
 
             val versionsList = mutableListOf<ModelVersion>()
             val vArray = mObj.optJSONArray("versions")
@@ -314,6 +369,12 @@ object ModelLoader {
                 for (j in 0 until vArray.length()) {
                     val vObj = vArray.getJSONObject(j)
                     val vId = vObj.getString("id")
+                    val vMinVersion = vObj.optString("minVersion", vObj.optString("minAppVersion", "")).ifBlank { null }
+                    if (vMinVersion != null && !isVersionAtLeast(appVersion, vMinVersion)) {
+                        Log.d(TAG, "Skipping version $vId of model $mId: requires version >= $vMinVersion, current is $appVersion")
+                        continue
+                    }
+
                     val vDisplayName = vObj.getString("displayName")
                     val engine = vObj.optString("engine", "onnx")
                     // LiteRT/GPU path was removed: the OpenCL delegate thrashes memory
@@ -330,6 +391,8 @@ object ModelLoader {
                     val fileSizeDesc = vObj.optString("fileSizeDesc", "")
                     val isRecommended = vObj.optBoolean("isRecommended", isVersionRecommended(engine, precision))
                     val vDesc = vObj.optString("description", "")
+                    val vDownloadUrl = vObj.optString("downloadUrl", "").ifBlank { null }
+                    val vKeepsBackingVocals = vObj.optBoolean("keepsBackingVocals", keepsBackingVocals)
 
                     val version = ModelVersion(
                         id = vId,
@@ -339,7 +402,10 @@ object ModelLoader {
                         fileName = fileName,
                         fileSizeDesc = fileSizeDesc,
                         isRecommended = isRecommended,
-                        description = vDesc
+                        description = vDesc,
+                        minVersion = vMinVersion ?: modelMinVersion,
+                        downloadUrl = vDownloadUrl,
+                        keepsBackingVocals = vKeepsBackingVocals
                     )
                     versionsList.add(version)
 
@@ -361,13 +427,18 @@ object ModelLoader {
                             chunkSamples = chunkSamples,
                             crossfadeSamples = crossfadeSamples,
                             hopSamples = hopSamples,
+                            vocalSdr = vocalSdr,
+                            instSdr = instSdr,
                             engine = engine,
                             precision = precision,
                             fileName = fileName,
                             fileSizeDesc = fileSizeDesc,
                             description = if (vDesc.isNotEmpty()) vDesc else description,
                             isRecommended = isRecommended,
-                            isSupported = true
+                            isSupported = true,
+                            minVersion = vMinVersion ?: modelMinVersion,
+                            downloadUrl = vDownloadUrl,
+                            keepsBackingVocals = vKeepsBackingVocals
                         )
                     )
                 }
@@ -390,9 +461,13 @@ object ModelLoader {
                         chunkSamples = chunkSamples,
                         crossfadeSamples = crossfadeSamples,
                         hopSamples = hopSamples,
+                        vocalSdr = vocalSdr,
+                        instSdr = instSdr,
                         description = description,
                         isDefault = isDefault,
-                        versions = versionsList
+                        versions = versionsList,
+                        minVersion = modelMinVersion,
+                        keepsBackingVocals = keepsBackingVocals
                     )
                 )
             }
@@ -836,7 +911,8 @@ object ModelLoader {
         }
 
         // 4. Final Fallback: Download model directly to cacheDir via HTTP if missing
-        val candidateUrls = getModelDownloadUrls(context, fileName)
+        val catalogInfo = AVAILABLE_MODELS.find { it.fileName == fileName }
+        val candidateUrls = getModelDownloadUrls(context, fileName, catalogInfo?.downloadUrl)
         Log.i(TAG, "Model $fileName not yet in cache. Downloading directly to ${targetFile.absolutePath} from: $candidateUrls")
         val tmpTarget = File(context.cacheDir, "$fileName.tmp")
         for (urlStr in candidateUrls) {

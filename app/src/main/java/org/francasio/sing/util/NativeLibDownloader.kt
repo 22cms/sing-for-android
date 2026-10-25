@@ -160,8 +160,16 @@ object NativeLibDownloader {
         }
     }
 
+    private fun safeGetString(context: Context, resId: Int, fallback: String): String {
+        return try {
+            context.getString(resId)
+        } catch (_: Throwable) {
+            fallback
+        }
+    }
+
     fun downloadOnnxRuntime(context: Context, onProgress: (String, Float) -> Unit): Boolean {
-        currentLabel = context.getString(R.string.downloading_onnx_runtime)
+        currentLabel = safeGetString(context, R.string.downloading_onnx_runtime, "Downloading ONNX Runtime...")
         val dir = getLibsDir(context)
         val abi = android.os.Build.SUPPORTED_ABIS.firstOrNull() ?: "arm64-v8a"
         val (url, tmpName) = if (abi.startsWith("arm64")) {
@@ -178,7 +186,7 @@ object NativeLibDownloader {
             currentLabel = ""
             return false
         }
-        currentLabel = context.getString(R.string.extracting_onnx_runtime)
+        currentLabel = safeGetString(context, R.string.extracting_onnx_runtime, "Extracting ONNX Runtime...")
         currentProgress = 0.75f
         onProgress(currentLabel, currentProgress)
         extractEntries(tmpAar, dir, setOf("libonnxruntime.so", "libonnxruntime4j_jni.so"))
@@ -191,7 +199,7 @@ object NativeLibDownloader {
 
     fun downloadQnnRuntime(context: Context, onProgress: (String, Float) -> Unit): Boolean {
         val skeleton = requiredSkeleton(context) ?: return false
-        currentLabel = context.getString(R.string.downloading_qnn_accelerator)
+        currentLabel = safeGetString(context, R.string.downloading_qnn_accelerator, "Downloading QNN Accelerator...")
         val dir = getLibsDir(context)
         val tmpAar = File(context.cacheDir, "qnn-runtime.aar.tmp")
         val ok = downloadFile(QNN_AAR_URL, tmpAar) { p ->
@@ -202,7 +210,7 @@ object NativeLibDownloader {
             currentLabel = ""
             return false
         }
-        currentLabel = context.getString(R.string.extracting_qnn_accelerator)
+        currentLabel = safeGetString(context, R.string.extracting_qnn_accelerator, "Extracting QNN Accelerator...")
         currentProgress = 0.65f
         onProgress(currentLabel, currentProgress)
 

@@ -53,21 +53,23 @@ fun SettingSwitchRow(
     description: String,
     checked: Boolean,
     onCheckedChange: (Boolean) -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true
 ) {
     val isMaterialYou = LocalIsMaterialYou.current
+    val contentAlpha = if (enabled) 1f else 0.38f
 
     Row(
         modifier = modifier
             .fillMaxWidth()
-            .clickable { onCheckedChange(!checked) }
+            .clickable(enabled = enabled) { onCheckedChange(!checked) }
             .padding(horizontal = 18.dp, vertical = 15.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         Icon(
             painter = icon,
             contentDescription = null,
-            tint = TextPrimary,
+            tint = TextPrimary.copy(alpha = contentAlpha),
             modifier = Modifier.size(24.dp)
         )
 
@@ -76,13 +78,13 @@ fun SettingSwitchRow(
         Column(modifier = Modifier.weight(1f)) {
             Text(
                 text = title,
-                color = TextPrimary,
+                color = TextPrimary.copy(alpha = contentAlpha),
                 fontSize = 15.sp,
                 fontWeight = FontWeight.SemiBold
             )
             Text(
                 text = description,
-                color = TextSecondary,
+                color = TextSecondary.copy(alpha = contentAlpha),
                 fontSize = 12.sp,
                 lineHeight = 16.sp,
                 modifier = Modifier.padding(top = 2.dp)
@@ -94,6 +96,7 @@ fun SettingSwitchRow(
         Switch(
             checked = checked,
             onCheckedChange = onCheckedChange,
+            enabled = enabled,
             thumbContent = {
                 if (checked) {
                     Icon(
