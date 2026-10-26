@@ -413,6 +413,9 @@ fun ModelSelectionScreen(
                         modelDef = modelDef,
                         selectedModelId = selectedModelId,
                         highlightPulse = if (isSelectedGroup) highlightPulse.value else 0f,
+                        selectedStemFilter = selectedStemFilter,
+                        backingRetentionOnly = backingRetentionOnly,
+                        selectedFamilyFilter = selectedFamilyFilter,
                         onVersionSelect = onModelSelect
                     )
                 }
@@ -518,6 +521,9 @@ private fun ModelGroupCard(
     modelDef: ModelLoader.ModelDefinition,
     selectedModelId: String,
     highlightPulse: Float = 0f,
+    selectedStemFilter: String? = null,
+    backingRetentionOnly: Boolean = false,
+    selectedFamilyFilter: String? = null,
     onVersionSelect: (String) -> Unit
 ) {
     val availableEngines = remember(modelDef.versions) {
@@ -601,16 +607,27 @@ private fun ModelGroupCard(
                     horizontalArrangement = Arrangement.spacedBy(6.dp),
                     verticalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
-                    // Target Stem Badge: Instrumental preferred over Vocal
+                    // Model Family Badge: highlighted when family filter matches
+                    val isFamilyHighlighted = selectedFamilyFilter != null &&
+                            modelDef.resolvedFamily.equals(selectedFamilyFilter, ignoreCase = true)
                     StatusBadge(
-                        text = if (modelDef.isInstrumental) "Instrumental Output" else "Vocal Output",
-                        isPreferred = modelDef.isInstrumental
+                        text = modelDef.resolvedFamily,
+                        isPreferred = isFamilyHighlighted
                     )
 
+                    // Target Stem Badge: highlighted when output filter matches
+                    val isStemHighlighted = selectedStemFilter != null &&
+                            modelDef.targetStem.equals(selectedStemFilter, ignoreCase = true)
+                    StatusBadge(
+                        text = if (modelDef.isInstrumental) "Instrumental Output" else "Vocal Output",
+                        isPreferred = isStemHighlighted
+                    )
+
+                    // Backing Vocals Retention Badge: highlighted when backing retention filter is active
                     if (modelDef.keepsBackingVocals) {
                         StatusBadge(
                             text = stringResource(id = R.string.badge_keeps_backing_vocals),
-                            isPreferred = false
+                            isPreferred = backingRetentionOnly
                         )
                     }
 
@@ -813,9 +830,9 @@ private fun ModelVersionRow(
 
     val isQualcomm = remember { DeviceHelper.isQualcommWithHexagonHtp }
     val isEnginePreferred = when {
-        modelInfo.isViNNet -> true
-        isQualcomm && ModelLoader.isOnnxRuntimeAvailable -> modelInfo.engine == SingSettings.ENGINE_ONNX
-        else -> modelInfo.engine == SingSettings.ENGINE_MNN
+        modelInfo.isViNNet || modelInfo.engine.equals(SingSettings.ENGINE_NATIVE, ignoreCase = true) -> false
+        isQualcomm && ModelLoader.isOnnxRuntimeAvailable -> modelInfo.engine.equals(SingSettings.ENGINE_ONNX, ignoreCase = true)
+        else -> modelInfo.engine.equals(SingSettings.ENGINE_MNN, ignoreCase = true)
     }
     val isPrecisionPreferred = modelInfo.precision.equals("fp16", ignoreCase = true) ||
             modelInfo.precisionBadge.equals("FP16", ignoreCase = true)
