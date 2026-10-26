@@ -260,20 +260,18 @@ class AiStemSeparationEngine(
     val cushionFrames: Long
         get() = if (active) maxOf(0L, inWriteFrames - vocalReadFrames) else 0L
 
-    val needsInitialChunkBurst: Boolean
+    val targetCushionFrames: Long
         get() = when {
-            isTimeDomain -> {
-                val needed = currentBackend.modelInfo.lookaheadSize + currentBackend.modelInfo.blockSize
-                active && vocalWriteFrames == 0L && ((inWriteFrames - inProcessedFrames) < needed)
-            }
-            isVr3Band -> {
-                val needed = vrDspEngine.chunkSamples - VrDspEngine.OFFSET_FRAMES * 512
-                active && vocalWriteFrames == 0L && ((inWriteFrames - inProcessedFrames) < needed)
-            }
-            else -> {
-                active && vocalWriteFrames == 0L && ((inWriteFrames - inProcessedFrames) < CHUNK_SAMPLES)
-            }
+            isTimeDomain -> 88200L // ~2.0s
+            isVr3Band -> vrDspEngine.chunkSamples.toLong() + 2L * (vrDspEngine.validRoiSamples - VR_CROSSFADE_SAMPLES) // 261,632 + 2 * 114,176 = 489,984 (~11.1s)
+            else -> PRE_ROLL_FRAMES.toLong() // 478,140 (~10.8s)
         }
+
+    val needsBurst: Boolean
+        get() = active && !endOfStreamSignaled && (cushionFrames < targetCushionFrames)
+
+    val needsInitialChunkBurst: Boolean
+        get() = needsBurst
 
     val hasInitialChunkGathered: Boolean
         get() = when {
@@ -295,12 +293,8 @@ class AiStemSeparationEngine(
         if (!active) return true
 
         if (vocalWriteFrames == 0L) {
-            val initialTarget = when {
-                isTimeDomain -> currentBackend.modelInfo.lookaheadSize + 2 * currentBackend.modelInfo.blockSize
-                isVr3Band -> vrDspEngine.chunkSamples + vrDspEngine.roiSamples
-                else -> PRE_ROLL_FRAMES
-            }
-            return (inWriteFrames + frameCount) <= (initialTarget + 4096)
+            val initialTarget = targetCushionFrames
+            return (inWriteFrames + frameCount) <= (initialTarget + 8192)
         }
 
         // Steady-state backpressure: enforce max cushion to guarantee zero ring buffer wraparound
@@ -761,7 +755,7 @@ class AiStemSeparationEngine(
 
                             // Thermal pacing
                             val curCushion = maxOf(0L, vocalWriteFrames - vocalReadFrames)
-                            val targetCushion = 131072L // ~3.0s target cushion
+                            val targetCushion = 262144L // ~5.9s (at least 2 full chunks cushion)
                             if (ecoMode && !endOfStreamSignaled && curCushion > targetCushion) {
                                 while (running && active && ecoMode && !endOfStreamSignaled && myGen == seekGeneration.get()) {
                                     val cushion = maxOf(0L, vocalWriteFrames - vocalReadFrames)

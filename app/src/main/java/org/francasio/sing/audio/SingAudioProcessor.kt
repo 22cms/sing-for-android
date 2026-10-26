@@ -126,9 +126,18 @@ class SingAudioProcessor(
     @Volatile
     var isEnabled: Boolean = false
         set(value) {
+            val wasEnabled = field
             field = value
-            if (value && aiEngine == null) {
-                ensureEngineInitialized()
+            if (value && !wasEnabled) {
+                if (aiEngine == null) {
+                    ensureEngineInitialized()
+                } else {
+                    aiEngine?.activate()
+                }
+            } else if (!value && wasEnabled) {
+                aiEngine?.deactivate()
+                downResampler?.reset()
+                upResampler?.reset()
             }
         }
 
@@ -195,9 +204,7 @@ class SingAudioProcessor(
                 val currentTarget = ModelLoader.currentTarget
                 val currentModel = ModelLoader.currentModelId
                 if (SingSettings.threadCount != currentThreads || SingSettings.hardwareTarget != currentTarget || selectedModel != currentModel) {
-                    if (selectedModel != currentModel) {
-                        isEngineReady = false
-                    }
+                    isEngineReady = false
                     bgExecutor.execute {
                         try {
                             val activePath = SingSettings.resolvedModulePath ?: moduleApkPath
@@ -241,6 +248,7 @@ class SingAudioProcessor(
             return
         }
 
+        isEngineReady = false
         bgExecutor.execute {
             val engine = aiEngine
             val targetModel = SingSettings.selectedModelId
@@ -378,69 +386,65 @@ class SingAudioProcessor(
                 }
             }
 
-            if (canAccept) {
-                // Decode incoming PCM bytes to normalized floats [-1.0, 1.0]
-                inputBuffer.order(ByteOrder.LITTLE_ENDIAN)
-                when (encoding) {
-                    ENCODING_PCM_16BIT -> {
-                        val shortBuf = inputBuffer.asShortBuffer()
-                        shortBuf.get(inShorts, 0, totalSamples)
-                        val factor = 1.0f / 32768.0f
-                        for (i in 0 until totalSamples) {
-                            inFloats[i] = inShorts[i] * factor
-                        }
-                    }
-                    ENCODING_PCM_FLOAT -> {
-                        inputBuffer.asFloatBuffer().get(inFloats, 0, totalSamples)
-                    }
-                    ENCODING_PCM_24BIT -> {
-                        val startPos = inputBuffer.position()
-                        val factor = 1.0f / 8388608.0f
-                        for (i in 0 until totalSamples) {
-                            val b0 = inputBuffer.get(startPos + i * 3).toInt() and 0xFF
-                            val b1 = inputBuffer.get(startPos + i * 3 + 1).toInt() and 0xFF
-                            val b2 = inputBuffer.get(startPos + i * 3 + 2).toInt()
-                            val sampleInt = (b2 shl 16) or (b1 shl 8) or b0
-                            inFloats[i] = sampleInt * factor
-                        }
-                    }
-                    ENCODING_PCM_32BIT -> {
-                        val intBuf = inputBuffer.asIntBuffer()
-                        val factor = 1.0f / 2147483648.0f
-                        for (i in 0 until totalSamples) {
-                            inFloats[i] = intBuf.get() * factor
-                        }
-                    }
-                    else -> {
-                        val shortBuf = inputBuffer.asShortBuffer()
-                        shortBuf.get(inShorts, 0, totalSamples)
-                        val factor = 1.0f / 32768.0f
-                        for (i in 0 until totalSamples) {
-                            inFloats[i] = inShorts[i] * factor
-                        }
+            // Decode incoming PCM bytes to normalized floats [-1.0, 1.0]
+            inputBuffer.order(ByteOrder.LITTLE_ENDIAN)
+            when (encoding) {
+                ENCODING_PCM_16BIT -> {
+                    val shortBuf = inputBuffer.asShortBuffer()
+                    shortBuf.get(inShorts, 0, totalSamples)
+                    val factor = 1.0f / 32768.0f
+                    for (i in 0 until totalSamples) {
+                        inFloats[i] = inShorts[i] * factor
                     }
                 }
-                inputBuffer.position(inputBuffer.limit())
+                ENCODING_PCM_FLOAT -> {
+                    inputBuffer.asFloatBuffer().get(inFloats, 0, totalSamples)
+                }
+                ENCODING_PCM_24BIT -> {
+                    val startPos = inputBuffer.position()
+                    val factor = 1.0f / 8388608.0f
+                    for (i in 0 until totalSamples) {
+                        val b0 = inputBuffer.get(startPos + i * 3).toInt() and 0xFF
+                        val b1 = inputBuffer.get(startPos + i * 3 + 1).toInt() and 0xFF
+                        val b2 = inputBuffer.get(startPos + i * 3 + 2).toInt()
+                        val sampleInt = (b2 shl 16) or (b1 shl 8) or b0
+                        inFloats[i] = sampleInt * factor
+                    }
+                }
+                ENCODING_PCM_32BIT -> {
+                    val intBuf = inputBuffer.asIntBuffer()
+                    val factor = 1.0f / 2147483648.0f
+                    for (i in 0 until totalSamples) {
+                        inFloats[i] = intBuf.get() * factor
+                    }
+                }
+                else -> {
+                    val shortBuf = inputBuffer.asShortBuffer()
+                    shortBuf.get(inShorts, 0, totalSamples)
+                    val factor = 1.0f / 32768.0f
+                    for (i in 0 until totalSamples) {
+                        inFloats[i] = inShorts[i] * factor
+                    }
+                }
+            }
+            inputBuffer.position(inputBuffer.limit())
 
-                if (channelCount >= 2) {
-                    if (sampleRate == 44100) {
-                        engine.pushInput(inFloats, frameCount)
-                    } else {
-                        if (sampleRate != currentSampleRate || downResampler == null) {
-                            currentSampleRate = sampleRate
-                            downResampler?.close()
-                            upResampler?.close()
-                            downResampler = StereoResampler(sampleRate, 44100)
-                            upResampler = StereoResampler(44100, sampleRate)
-                        }
-                        val frames44k = downResampler!!.resample(inFloats, frameCount, resampledInFloats)
-                        engine.pushInput(resampledInFloats, frames44k)
+            // Push incoming audio frames to the engine.
+            // Never discard or drop input frames - dropping input frames creates temporal discontinuities (pops/clicks).
+            if (channelCount >= 2) {
+                if (sampleRate == 44100) {
+                    engine.pushInput(inFloats, frameCount)
+                } else {
+                    if (sampleRate != currentSampleRate || downResampler == null) {
+                        currentSampleRate = sampleRate
+                        downResampler?.close()
+                        upResampler?.close()
+                        downResampler = StereoResampler(sampleRate, 44100)
+                        upResampler = StereoResampler(44100, sampleRate)
                     }
+                    val frames44k = downResampler!!.resample(inFloats, frameCount, resampledInFloats)
+                    engine.pushInput(resampledInFloats, frames44k)
                 }
-            } else {
-                // Backpressure: do not feed the engine, but still consume the
-                // input buffer so ExoPlayer advances instead of reprocessing.
-                inputBuffer.position(inputBuffer.limit())
             }
 
             if (channelCount >= 2) {
@@ -526,19 +530,19 @@ class SingAudioProcessor(
     }
 
     val needsBurst: Boolean
-        get() = isEnabled && (aiEngine?.needsInitialChunkBurst == true)
+        get() = isEnabled && (aiEngine?.needsBurst == true)
 
     /**
-     * Bounded burst decoding on SVAudioRendererV2 to prime Chunk 0 in ~50-100ms
-     * instead of waiting 5.92s of real-time audio playback.
+     * Bounded burst decoding on SVAudioRendererV2 to prime initial chunks in ~50-100ms
+     * and maintain a healthy cushion of processed audio.
      */
     fun maybeBurstDecode(rendererObj: Any) {
         val engine = aiEngine ?: return
-        if (!isEnabled || !engine.needsInitialChunkBurst) return
+        if (!isEnabled || !engine.needsBurst) return
 
         try {
             var burstCount = 0
-            while (burstCount < 64 && engine.needsInitialChunkBurst) {
+            while (burstCount < 32 && engine.needsBurst) {
                 val hasOutput = ReflectionUtils.callMethod(rendererObj, "consumeDecoderOutputBuffers") as? Boolean ?: false
                 ReflectionUtils.callMethod(rendererObj, "consumeFromInputStream")
                 if (!hasOutput) break
