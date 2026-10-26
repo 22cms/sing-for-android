@@ -25,7 +25,9 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.Icon
+import androidx.compose.material3.LoadingIndicator
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -59,10 +61,12 @@ import org.francasio.sing.ui.sections.ModelFilterRow
 import org.francasio.sing.ui.sections.ModelGroupCard
 import org.francasio.sing.ui.theme.BackgroundDark
 import org.francasio.sing.ui.theme.CardDark
+import org.francasio.sing.ui.theme.Primary
 import org.francasio.sing.ui.theme.TextPrimary
 import org.francasio.sing.ui.theme.TextSecondary
 import org.francasio.sing.util.ModelLoader
 
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 fun ModelSelectionScreen(
     selectedModelId: String,
@@ -131,7 +135,7 @@ fun ModelSelectionScreen(
     var isRenderReady by remember { mutableStateOf(false) }
 
     LaunchedEffect(Unit) {
-        delay(300)
+        delay(350)
         isRenderReady = true
     }
 
@@ -179,7 +183,18 @@ fun ModelSelectionScreen(
 
             Spacer(modifier = Modifier.height(14.dp))
 
-            if (isRenderReady) {
+            if (!isRenderReady) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 72.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    LoadingIndicator(
+                        color = Primary
+                    )
+                }
+            } else {
                 // Empty state if filters match no models
                 if (visibleModelDefinitions.isEmpty()) {
                     Card(
