@@ -32,7 +32,7 @@
     <string name="title_sing_settings">Impostazioni di Sing</string>
     <string name="setting_preserve_side_title">Conserva le Voci sui Canali Side</string>
     <string name="desc_preserve_side">Usa un taglio spettrale del centro per conservare cori, riverbero, widening del vocoder ed altri effetti stereo.</string>
-    <string name="desc_preserve_side_disabled">Disattivato perché il modello attivo conserva già i cori.</string>
+    <string name="desc_preserve_side_disabled">Il modello attivo conserva già i cori.</string>
     <string name="badge_keeps_backing_vocals">Conserva Cori</string>
     <string name="setting_two_way_slider_title">Cursore a Due Vie</string>
     <string name="desc_two_way_slider" formatted="false">Divide il cursore Sing: 0–50% riduce le voci per il Karaoke, mentre 50–100% riduce la base musicale per isolare la voce (acapella).</string>

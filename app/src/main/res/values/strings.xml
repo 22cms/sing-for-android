@@ -50,7 +50,7 @@
     <string name="title_sing_settings">Sing Settings</string>
     <string name="setting_preserve_side_title">Preserve Vocal Side Channel</string>
     <string name="desc_preserve_side">Uses a spectral center cut to preserve backing vocals, reverb, and vocoder widening and other stereo effects.</string>
-    <string name="desc_preserve_side_disabled">Disabled because the active model already retains backing vocals.</string>
+    <string name="desc_preserve_side_disabled">The active model already retains backing vocals.</string>
     <string name="badge_keeps_backing_vocals">Backing Vocals Retained</string>
 
     <string name="setting_two_way_slider_title">Two-Way Slider Mode</string>
