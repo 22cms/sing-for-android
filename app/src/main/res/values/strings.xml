@@ -32,9 +32,15 @@
     <string name="status_model_format">%1$s • %2$d threads</string>
     <string name="title_model_selection">Neural Model</string>
     <string name="desc_model_selection">Select the neural model architecture for real-time vocal isolation and attenuation.</string>
-    <string name="model_info_title">Architectures, Hardware &amp; Precision</string>
-    <string name="model_info_desc" formatted="false">• Apple Sing (Vi-NNet): Official Apple Music Sing model. It runs entirely on CPU through a custom C++ engine, hence it\'s included in the app solely for reference and for comparisons with other models.\n• Kim Inst (MDX-Net, 3072 bins): High-fidelity model covering the full 22.05 kHz spectrum for s bleed-free instrumental stem extraction.\n• UVR MDX-NET 1-9703 (2048 bins): Ultra-lightweight model with low-ish latency and minimal battery consumption, ideal for sustained real-time playback.\n• ONNX Runtime (Hexagon HTP NPU &amp; CPU): Recommended for Qualcomm Snapdragon processors equipped with a Hexagon HTP NPU (FP16), or high-performance multi-threaded CPUs (FP32).\n• Alibaba MNN (OpenCL / Vulkan / NNAPI / CPU): Recommended for all other devices, providing cross-platform hardware acceleration across Qualcomm Adreno, ARM Mali, and Samsung Xclipse GPUs. Qualcomm Hexagon acceleration is also supported, but with lower performance than ONNX (~25% less).\n• FP16 vs FP32: FP16 halves memory bandwidth and is required for NPU acceleration. FP32 provides exact full precision and prevents underflow on GPUs and powerful CPUs. Running an FP32 model under NPU acceleration will usually result in an on-the-fly FP16 quantization, hence prequantized models are provided.</string>
+    <string name="model_info_title">Hardware &amp; Precision</string>
+    <string name="model_info_desc" formatted="false">• ONNX Runtime (Hexagon HTP NPU &amp; CPU): Recommended for Qualcomm Snapdragon processors equipped with a Hexagon HTP NPU (FP16), or high-performance multi-threaded CPUs (FP32).\n• Alibaba MNN (OpenCL / Vulkan / NNAPI / CPU): Recommended for all other devices, providing cross-platform hardware acceleration across Qualcomm Adreno, ARM Mali, and Samsung Xclipse GPUs. Qualcomm Hexagon acceleration is also supported, but with lower performance than ONNX (~25% less).\n• FP16 vs FP32: FP16 halves memory bandwidth and is required for NPU acceleration. FP32 provides exact full precision and prevents underflow on GPUs and powerful CPUs. Running an FP32 model under NPU acceleration will usually result in an on-the-fly FP16 quantization, hence prequantized models are provided.</string>
     <string name="badge_recommended">Recommended</string>
+    <string name="filter_family">Family</string>
+    <string name="filter_all_families">All Families</string>
+    <string name="filter_vocal">Vocal</string>
+    <string name="filter_instrumental">Instrumental</string>
+    <string name="filter_backing_retention">Backing Retention</string>
+    <string name="filter_no_models">No models match the selected filters</string>
 
     <!-- Lyrics Settings -->
     <string name="title_lyrics">Lyrics</string>

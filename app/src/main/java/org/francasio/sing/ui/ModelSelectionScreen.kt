@@ -9,6 +9,7 @@ import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -39,7 +40,11 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -92,6 +97,7 @@ fun ModelSelectionScreen(
     onBack: () -> Unit
 ) {
     val context = LocalContext.current
+    val isMaterialYou = LocalIsMaterialYou.current
 
     val modelDefinitions = remember { mutableStateListOf<ModelLoader.ModelDefinition>() }
 
@@ -116,11 +122,38 @@ fun ModelSelectionScreen(
     val cardPositions = remember { mutableMapOf<String, Int>() }
     val highlightPulse = remember { Animatable(0f) }
 
-    val visibleModelDefinitions = remember(modelDefinitions.toList()) {
-        // ONNX models stay visible even when their native libs are not downloaded
-        // yet: selecting one triggers the on-demand download flow.
-        modelDefinitions.toList()
+    var selectedStemFilter by remember { mutableStateOf<String?>(null) } // "vocal", "instrumental", or null
+    var backingRetentionOnly by remember { mutableStateOf(false) }
+    var selectedFamilyFilter by remember { mutableStateOf<String?>(null) }
+    var isFamilyMenuExpanded by remember { mutableStateOf(false) }
+
+    val availableFamilies = remember(modelDefinitions.toList()) {
+        modelDefinitions.map { it.resolvedFamily }.distinct().filter { it.isNotBlank() }
     }
+
+    val visibleModelDefinitions = remember(
+        modelDefinitions.toList(),
+        selectedStemFilter,
+        backingRetentionOnly,
+        selectedFamilyFilter
+    ) {
+        modelDefinitions.filter { def ->
+            val matchesStem = selectedStemFilter == null || def.targetStem.equals(selectedStemFilter, ignoreCase = true)
+            val matchesBacking = !backingRetentionOnly || (def.keepsBackingVocals || def.versions.any { it.keepsBackingVocals })
+            val matchesFamily = selectedFamilyFilter == null || def.resolvedFamily.equals(selectedFamilyFilter, ignoreCase = true)
+            matchesStem && matchesBacking && matchesFamily
+        }
+    }
+
+    val chipColors = FilterChipDefaults.filterChipColors(
+        containerColor = SurfaceContainerHigh.copy(alpha = 0.5f),
+        labelColor = TextPrimary,
+        iconColor = TextSecondary,
+        selectedContainerColor = if (isMaterialYou) Primary else Primary.copy(alpha = 0.18f),
+        selectedLabelColor = if (isMaterialYou) Accent2_900 else Primary,
+        selectedLeadingIconColor = if (isMaterialYou) Accent2_900 else Primary,
+        selectedTrailingIconColor = if (isMaterialYou) Accent2_900 else Primary
+    )
 
     LaunchedEffect(scrollToSelected, visibleModelDefinitions.size) {
         if (scrollToSelected && visibleModelDefinitions.isNotEmpty()) {
@@ -149,10 +182,220 @@ fun ModelSelectionScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .verticalScroll(scrollState)
-                .padding(horizontal = 16.dp)
         ) {
             // Space to clear the large expanded header with comfortable breathing room
             Spacer(modifier = Modifier.height(statusBarTop + 196.dp))
+
+            // Filter Chips Bar
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .horizontalScroll(rememberScrollState())
+                    .padding(horizontal = 16.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                // 1. Model Family (Expandable Filter Chip)
+                Box {
+                    FilterChip(
+                        selected = selectedFamilyFilter != null,
+                        onClick = { isFamilyMenuExpanded = true },
+                        label = {
+                            Text(
+                                text = selectedFamilyFilter ?: stringResource(R.string.filter_family),
+                                fontSize = 13.sp,
+                                fontWeight = if (selectedFamilyFilter != null) FontWeight.Medium else FontWeight.Normal
+                            )
+                        },
+                        leadingIcon = {
+                            Icon(
+                                painter = painterResource(id = R.drawable.ic_ai_models),
+                                contentDescription = null,
+                                modifier = Modifier.size(FilterChipDefaults.IconSize)
+                            )
+                        },
+                        trailingIcon = {
+                            val rotation by animateFloatAsState(
+                                targetValue = if (isFamilyMenuExpanded) 180f else 0f,
+                                animationSpec = tween(200),
+                                label = "familyDropdownRotation"
+                            )
+                            Icon(
+                                imageVector = Icons.Default.KeyboardArrowDown,
+                                contentDescription = null,
+                                modifier = Modifier
+                                    .size(FilterChipDefaults.IconSize)
+                                    .rotate(rotation)
+                            )
+                        },
+                        colors = chipColors,
+                        border = FilterChipDefaults.filterChipBorder(
+                            enabled = true,
+                            selected = selectedFamilyFilter != null,
+                            borderColor = DividerDark.copy(alpha = 0.6f),
+                            selectedBorderColor = if (isMaterialYou) Color.Transparent else Primary.copy(alpha = 0.4f)
+                        )
+                    )
+
+                    DropdownMenu(
+                        expanded = isFamilyMenuExpanded,
+                        onDismissRequest = { isFamilyMenuExpanded = false },
+                        modifier = Modifier.background(SurfaceDark)
+                    ) {
+                        DropdownMenuItem(
+                            text = { Text(stringResource(R.string.filter_all_families), color = TextPrimary) },
+                            onClick = {
+                                selectedFamilyFilter = null
+                                isFamilyMenuExpanded = false
+                            },
+                            leadingIcon = if (selectedFamilyFilter == null) {
+                                {
+                                    Icon(
+                                        imageVector = Icons.Outlined.Check,
+                                        contentDescription = null,
+                                        tint = Primary
+                                    )
+                                }
+                            } else null
+                        )
+                        availableFamilies.forEach { family ->
+                            val isSelected = selectedFamilyFilter.equals(family, ignoreCase = true)
+                            DropdownMenuItem(
+                                text = { Text(family, color = TextPrimary) },
+                                onClick = {
+                                    selectedFamilyFilter = if (isSelected) null else family
+                                    isFamilyMenuExpanded = false
+                                },
+                                leadingIcon = if (isSelected) {
+                                    {
+                                        Icon(
+                                            imageVector = Icons.Outlined.Check,
+                                            contentDescription = null,
+                                            tint = Primary
+                                        )
+                                    }
+                                } else null
+                            )
+                        }
+                    }
+                }
+
+                // 2. Vocal Output Filter Chip
+                FilterChip(
+                    selected = selectedStemFilter == "vocal",
+                    onClick = {
+                        selectedStemFilter = if (selectedStemFilter == "vocal") null else "vocal"
+                    },
+                    label = {
+                        Text(
+                            text = stringResource(R.string.filter_vocal),
+                            fontSize = 13.sp,
+                            fontWeight = if (selectedStemFilter == "vocal") FontWeight.Medium else FontWeight.Normal
+                        )
+                    },
+                    leadingIcon = {
+                        Icon(
+                            painter = painterResource(id = R.drawable.ic_sing),
+                            contentDescription = null,
+                            modifier = Modifier.size(FilterChipDefaults.IconSize)
+                        )
+                    },
+                    colors = chipColors,
+                    border = FilterChipDefaults.filterChipBorder(
+                        enabled = true,
+                        selected = selectedStemFilter == "vocal",
+                        borderColor = DividerDark.copy(alpha = 0.6f),
+                        selectedBorderColor = if (isMaterialYou) Color.Transparent else Primary.copy(alpha = 0.4f)
+                    )
+                )
+
+                // 3. Instrumental Output Filter Chip
+                FilterChip(
+                    selected = selectedStemFilter == "instrumental",
+                    onClick = {
+                        selectedStemFilter = if (selectedStemFilter == "instrumental") null else "instrumental"
+                    },
+                    label = {
+                        Text(
+                            text = stringResource(R.string.filter_instrumental),
+                            fontSize = 13.sp,
+                            fontWeight = if (selectedStemFilter == "instrumental") FontWeight.Medium else FontWeight.Normal
+                        )
+                    },
+                    leadingIcon = {
+                        Icon(
+                            painter = painterResource(id = R.drawable.ic_instrumental),
+                            contentDescription = null,
+                            modifier = Modifier.size(FilterChipDefaults.IconSize)
+                        )
+                    },
+                    colors = chipColors,
+                    border = FilterChipDefaults.filterChipBorder(
+                        enabled = true,
+                        selected = selectedStemFilter == "instrumental",
+                        borderColor = DividerDark.copy(alpha = 0.6f),
+                        selectedBorderColor = if (isMaterialYou) Color.Transparent else Primary.copy(alpha = 0.4f)
+                    )
+                )
+
+                // 4. Backing Vocals Retention Filter Chip
+                FilterChip(
+                    selected = backingRetentionOnly,
+                    onClick = {
+                        backingRetentionOnly = !backingRetentionOnly
+                    },
+                    label = {
+                        Text(
+                            text = stringResource(R.string.filter_backing_retention),
+                            fontSize = 13.sp,
+                            fontWeight = if (backingRetentionOnly) FontWeight.Medium else FontWeight.Normal
+                        )
+                    },
+                    leadingIcon = {
+                        Icon(
+                            painter = painterResource(id = R.drawable.ic_preserve_sides),
+                            contentDescription = null,
+                            modifier = Modifier.size(FilterChipDefaults.IconSize)
+                        )
+                    },
+                    colors = chipColors,
+                    border = FilterChipDefaults.filterChipBorder(
+                        enabled = true,
+                        selected = backingRetentionOnly,
+                        borderColor = DividerDark.copy(alpha = 0.6f),
+                        selectedBorderColor = if (isMaterialYou) Color.Transparent else Primary.copy(alpha = 0.4f)
+                    )
+                )
+            }
+
+            Spacer(modifier = Modifier.height(14.dp))
+
+            // Empty state if filters match no models
+            if (visibleModelDefinitions.isEmpty()) {
+                Card(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp),
+                    shape = RoundedCornerShape(16.dp),
+                    colors = CardDefaults.cardColors(containerColor = CardDark),
+                    elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 32.dp, horizontal = 16.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = stringResource(id = R.string.filter_no_models),
+                            color = TextSecondary,
+                            fontSize = 14.sp,
+                            textAlign = TextAlign.Center
+                        )
+                    }
+                }
+                Spacer(modifier = Modifier.height(14.dp))
+            }
 
             // Split by Models First: Render a separate Card for each Model Definition
             visibleModelDefinitions.forEach { modelDef ->
@@ -160,6 +403,7 @@ fun ModelSelectionScreen(
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
+                        .padding(horizontal = 16.dp)
                         .onGloballyPositioned { coordinates ->
                             val y = coordinates.positionInParent().y.toInt()
                             cardPositions[modelDef.id] = y
@@ -177,7 +421,9 @@ fun ModelSelectionScreen(
 
             // Hardware Acceleration Info Card (AOSP Details style)
             Card(
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp),
                 shape = RoundedCornerShape(16.dp),
                 colors = CardDefaults.cardColors(containerColor = CardDark),
                 elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)

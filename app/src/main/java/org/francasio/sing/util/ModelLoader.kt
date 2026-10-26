@@ -100,11 +100,20 @@ object ModelLoader {
         val isDefault: Boolean = false,
         val versions: List<ModelVersion> = emptyList(),
         val minVersion: String? = null,
-        val keepsBackingVocals: Boolean = false
+        val keepsBackingVocals: Boolean = false,
+        val family: String = ""
     ) {
         val isInstrumental: Boolean get() = targetStem.equals("instrumental", ignoreCase = true)
         val isTimeDomain: Boolean get() = networkType.equals("time_domain", ignoreCase = true)
         val isVr3Band: Boolean get() = networkType.equals("vr_3band", ignoreCase = true) || networkType.equals("vr", ignoreCase = true)
+        val resolvedFamily: String get() = family.ifBlank {
+            when {
+                isVr3Band || displayName.contains("VR Arch", ignoreCase = true) -> "VR Arch"
+                isTimeDomain || id == "apple_sing" || displayName.contains("Vi-NNet", ignoreCase = true) -> "Vi-NNet"
+                displayName.contains("MDX", ignoreCase = true) || id.contains("mdx") || networkType == "stft" -> "MDX-Net"
+                else -> "Other"
+            }
+        }
     }
 
     data class ModelVersion(
@@ -149,11 +158,20 @@ object ModelLoader {
         val isSupported: Boolean = true,
         val minVersion: String? = null,
         val downloadUrl: String? = null,
-        val keepsBackingVocals: Boolean = false
+        val keepsBackingVocals: Boolean = false,
+        val family: String = ""
     ) {
         val isInstrumental: Boolean get() = targetStem.equals("instrumental", ignoreCase = true)
         val isTimeDomain: Boolean get() = networkType.equals("time_domain", ignoreCase = true)
         val isVr3Band: Boolean get() = networkType.equals("vr_3band", ignoreCase = true) || networkType.equals("vr", ignoreCase = true)
+        val resolvedFamily: String get() = family.ifBlank {
+            when {
+                isVr3Band || modelDisplayName.contains("VR Arch", ignoreCase = true) -> "VR Arch"
+                isTimeDomain || modelId == "apple_sing" || modelDisplayName.contains("Vi-NNet", ignoreCase = true) -> "Vi-NNet"
+                modelDisplayName.contains("MDX", ignoreCase = true) || modelId.contains("mdx") || networkType == "stft" -> "MDX-Net"
+                else -> "Other"
+            }
+        }
         val isViNNet: Boolean get() = engine.equals(SingSettings.ENGINE_NATIVE, ignoreCase = true) || modelId == "apple_sing"
         val isOnnx: Boolean get() = engine.equals(SingSettings.ENGINE_ONNX, ignoreCase = true)
         val isMnn: Boolean get() = engine.equals(SingSettings.ENGINE_MNN, ignoreCase = true)
@@ -208,6 +226,7 @@ object ModelLoader {
                 put("isRecommended", info.isRecommended)
                 put("downloadUrl", info.downloadUrl ?: "")
                 put("keepsBackingVocals", info.keepsBackingVocals)
+                put("family", info.family)
             }
             File(context.filesDir, SELECTED_MODEL_FILE).writeText(json.toString())
             registerDynamicModel(info)
@@ -259,7 +278,8 @@ object ModelLoader {
                 isRecommended = isRecommended,
                 isSupported = true,
                 downloadUrl = obj.optString("downloadUrl", "").ifBlank { null },
-                keepsBackingVocals = obj.optBoolean("keepsBackingVocals", false)
+                keepsBackingVocals = obj.optBoolean("keepsBackingVocals", false),
+                family = obj.optString("family", "")
             )
             registerDynamicModel(info)
             info
@@ -362,6 +382,15 @@ object ModelLoader {
             val description = mObj.optString("description", "")
             val isDefault = mObj.optBoolean("isDefault", false)
             val keepsBackingVocals = mObj.optBoolean("keepsBackingVocals", mObj.optBoolean("isKaraoke", mObj.optBoolean("disablePreserveSide", false)))
+            val parsedFamily = mObj.optString("family", "").trim()
+            val family = parsedFamily.ifBlank {
+                when {
+                    networkType.equals("vr_3band", ignoreCase = true) || networkType.equals("vr", ignoreCase = true) || mDisplayName.contains("VR Arch", ignoreCase = true) -> "VR Arch"
+                    networkType.equals("time_domain", ignoreCase = true) || mId == "apple_sing" || mDisplayName.contains("Vi-NNet", ignoreCase = true) -> "Vi-NNet"
+                    mDisplayName.contains("MDX", ignoreCase = true) || mId.contains("mdx") || networkType == "stft" -> "MDX-Net"
+                    else -> "Other"
+                }
+            }
 
             val versionsList = mutableListOf<ModelVersion>()
             val vArray = mObj.optJSONArray("versions")
@@ -438,7 +467,8 @@ object ModelLoader {
                             isSupported = true,
                             minVersion = vMinVersion ?: modelMinVersion,
                             downloadUrl = vDownloadUrl,
-                            keepsBackingVocals = vKeepsBackingVocals
+                            keepsBackingVocals = vKeepsBackingVocals,
+                            family = family
                         )
                     )
                 }
@@ -467,7 +497,8 @@ object ModelLoader {
                         isDefault = isDefault,
                         versions = versionsList,
                         minVersion = modelMinVersion,
-                        keepsBackingVocals = keepsBackingVocals
+                        keepsBackingVocals = keepsBackingVocals,
+                        family = family
                     )
                 )
             }
