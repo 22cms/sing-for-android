@@ -90,7 +90,7 @@ fun ModelFilterRow(
                 },
                 leadingIcon = {
                     Icon(
-                        painter = painterResource(id = R.drawable.ic_ai_models),
+                        painter = painterResource(id = R.drawable.ic_neural_network),
                         contentDescription = null,
                         modifier = Modifier.size(FilterChipDefaults.IconSize)
                     )

@@ -128,9 +128,16 @@ fun ModelSelectionScreen(
         }
     }
 
-    LaunchedEffect(scrollToSelected, visibleModelDefinitions.size) {
-        if (scrollToSelected && visibleModelDefinitions.isNotEmpty()) {
-            delay(300)
+    var isRenderReady by remember { mutableStateOf(false) }
+
+    LaunchedEffect(Unit) {
+        delay(300)
+        isRenderReady = true
+    }
+
+    LaunchedEffect(isRenderReady, scrollToSelected, visibleModelDefinitions.size) {
+        if (isRenderReady && scrollToSelected && visibleModelDefinitions.isNotEmpty()) {
+            delay(100)
             val targetDef = visibleModelDefinitions.find { it.versions.any { v -> v.id == selectedModelId } || it.id == selectedModelId }
             if (targetDef != null) {
                 val y = cardPositions[targetDef.id]
@@ -172,8 +179,60 @@ fun ModelSelectionScreen(
 
             Spacer(modifier = Modifier.height(14.dp))
 
-            // Empty state if filters match no models
-            if (visibleModelDefinitions.isEmpty()) {
+            if (isRenderReady) {
+                // Empty state if filters match no models
+                if (visibleModelDefinitions.isEmpty()) {
+                    Card(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp),
+                        shape = RoundedCornerShape(16.dp),
+                        colors = CardDefaults.cardColors(containerColor = CardDark),
+                        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 32.dp, horizontal = 16.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                text = stringResource(id = R.string.filter_no_models),
+                                color = TextSecondary,
+                                fontSize = 14.sp,
+                                textAlign = TextAlign.Center
+                            )
+                        }
+                    }
+                    Spacer(modifier = Modifier.height(14.dp))
+                }
+
+                // Split by Models First: Render a separate Card for each Model Definition
+                visibleModelDefinitions.forEach { modelDef ->
+                    val isSelectedGroup = modelDef.versions.any { it.id == selectedModelId } || modelDef.id == selectedModelId
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp)
+                            .onGloballyPositioned { coordinates ->
+                                val y = coordinates.positionInParent().y.toInt()
+                                cardPositions[modelDef.id] = y
+                            }
+                    ) {
+                        ModelGroupCard(
+                            modelDef = modelDef,
+                            selectedModelId = selectedModelId,
+                            highlightPulse = if (isSelectedGroup) highlightPulse.value else 0f,
+                            selectedStemFilter = selectedStemFilter,
+                            backingRetentionOnly = backingRetentionOnly,
+                            selectedFamilyFilter = selectedFamilyFilter,
+                            onVersionSelect = onModelSelect
+                        )
+                    }
+                    Spacer(modifier = Modifier.height(14.dp))
+                }
+
+                // Hardware Acceleration Info Card (AOSP Details style)
                 Card(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -182,84 +241,34 @@ fun ModelSelectionScreen(
                     colors = CardDefaults.cardColors(containerColor = CardDark),
                     elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
                 ) {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(vertical = 32.dp, horizontal = 16.dp),
-                        contentAlignment = Alignment.Center
+                    Row(
+                        modifier = Modifier.padding(18.dp),
+                        verticalAlignment = Alignment.Top
                     ) {
-                        Text(
-                            text = stringResource(id = R.string.filter_no_models),
-                            color = TextSecondary,
-                            fontSize = 14.sp,
-                            textAlign = TextAlign.Center
+                        Icon(
+                            imageVector = Icons.Outlined.Info,
+                            contentDescription = null,
+                            tint = TextPrimary,
+                            modifier = Modifier
+                                .size(22.dp)
+                                .padding(top = 2.dp)
                         )
-                    }
-                }
-                Spacer(modifier = Modifier.height(14.dp))
-            }
-
-            // Split by Models First: Render a separate Card for each Model Definition
-            visibleModelDefinitions.forEach { modelDef ->
-                val isSelectedGroup = modelDef.versions.any { it.id == selectedModelId } || modelDef.id == selectedModelId
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 16.dp)
-                        .onGloballyPositioned { coordinates ->
-                            val y = coordinates.positionInParent().y.toInt()
-                            cardPositions[modelDef.id] = y
+                        Spacer(modifier = Modifier.width(14.dp))
+                        Column {
+                            Text(
+                                text = stringResource(id = R.string.model_info_title),
+                                color = TextPrimary,
+                                fontSize = 14.5.sp,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                            Spacer(modifier = Modifier.height(6.dp))
+                            Text(
+                                text = stringResource(id = R.string.model_info_desc),
+                                color = TextSecondary,
+                                fontSize = 12.sp,
+                                lineHeight = 17.sp
+                            )
                         }
-                ) {
-                    ModelGroupCard(
-                        modelDef = modelDef,
-                        selectedModelId = selectedModelId,
-                        highlightPulse = if (isSelectedGroup) highlightPulse.value else 0f,
-                        selectedStemFilter = selectedStemFilter,
-                        backingRetentionOnly = backingRetentionOnly,
-                        selectedFamilyFilter = selectedFamilyFilter,
-                        onVersionSelect = onModelSelect
-                    )
-                }
-                Spacer(modifier = Modifier.height(14.dp))
-            }
-
-            // Hardware Acceleration Info Card (AOSP Details style)
-            Card(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp),
-                shape = RoundedCornerShape(16.dp),
-                colors = CardDefaults.cardColors(containerColor = CardDark),
-                elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
-            ) {
-                Row(
-                    modifier = Modifier.padding(18.dp),
-                    verticalAlignment = Alignment.Top
-                ) {
-                    Icon(
-                        imageVector = Icons.Outlined.Info,
-                        contentDescription = null,
-                        tint = TextPrimary,
-                        modifier = Modifier
-                            .size(22.dp)
-                            .padding(top = 2.dp)
-                    )
-                    Spacer(modifier = Modifier.width(14.dp))
-                    Column {
-                        Text(
-                            text = stringResource(id = R.string.model_info_title),
-                            color = TextPrimary,
-                            fontSize = 14.5.sp,
-                            fontWeight = FontWeight.SemiBold
-                        )
-                        Spacer(modifier = Modifier.height(6.dp))
-                        Text(
-                            text = stringResource(id = R.string.model_info_desc),
-                            color = TextSecondary,
-                            fontSize = 12.sp,
-                            lineHeight = 17.sp
-                        )
                     }
                 }
             }
