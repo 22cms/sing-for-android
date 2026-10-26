@@ -337,12 +337,17 @@ class LyricsBlurController(val ids: LyricsResourceIds) {
             LyricsBlurHelper.clearAllChildrenBlur(rv)
             return
         }
-        val focusedLyrics = activePositions.filterTo(mutableSetOf()) { it != dots }
+        val focusedLyrics = rows.filterTo(mutableSetOf()) { pos ->
+            val lineId = when {
+                dots != null && pos > dots -> pos - 1
+                else -> pos
+            }
+            lineId in activePositions
+        }
         if (state.tapped != null && state.tapped in focusedLyrics) state.tapped = null
         if (focusedLyrics.isNotEmpty()) state.lastFocused = focusedLyrics.maxOrNull()
-        val reference = state.tapped ?: state.lastFocused ?: (rows.minOrNull()!! - 1)
-        val instrumentalBreak = state.tapped == null && dots != null && dots >= reference &&
-            (dots in activePositions || focusedLyrics.isEmpty())
+        val reference = state.tapped ?: state.lastFocused ?: (if (dots != null) rows.minOrNull()!! - 1 else rows.minOrNull()!!)
+        val instrumentalBreak = state.tapped == null && dots != null && dots >= reference && focusedLyrics.isEmpty()
         val targets = LyricsBlurCascade.radii(rows, visible,
             if (instrumentalBreak) emptySet() else focusedLyrics,
             reference, if (instrumentalBreak) dots else null,

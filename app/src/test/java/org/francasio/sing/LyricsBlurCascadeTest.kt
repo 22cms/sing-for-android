@@ -36,4 +36,19 @@ class LyricsBlurCascadeTest {
         assertEquals(mapOf(2 to 5f, 3 to 5f, 5 to 5f, 6 to 10f),
             LyricsBlurCascade.radii((0..6).toList(), (2..6).toSet(), emptySet(), 4))
     }
+
+    @Test fun firstLineFocusedImmediatelyAtStartOfSongWithDots() {
+        assertEquals(mapOf(2 to 5f, 3 to 10f, 4 to 12f),
+            LyricsBlurCascade.radii((1..5).toList(), setOf(1, 2, 3), setOf(1), reference = 1, dots = null))
+    }
+
+    @Test fun firstLineFocusedImmediatelyWithoutDots() {
+        assertEquals(mapOf(1 to 5f, 2 to 10f, 3 to 12f),
+            LyricsBlurCascade.radii((0..5).toList(), setOf(0, 1, 2), setOf(0), reference = 0, dots = null))
+    }
+
+    @Test fun initialStateWithoutDotsKeepsFirstLineSharp() {
+        assertEquals(mapOf(1 to 5f, 2 to 10f, 3 to 12f),
+            LyricsBlurCascade.radii((0..5).toList(), setOf(0, 1, 2), emptySet(), reference = 0, dots = null, blurPreviousReference = false))
+    }
 }
