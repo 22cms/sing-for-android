@@ -18,13 +18,13 @@
     <string name="title_model_selection">Modello Neurale</string>
     <string name="desc_model_selection">Seleziona il modello neurale per l\'isolamento e l\'attenuazione vocale in tempo reale.</string>
     <string name="model_info_title">Hardware e Precisione</string>
-    <string name="model_info_desc" formatted="false">• ONNX Runtime (Hexagon HTP NPU &amp; CPU): Consigliato per processori Qualcomm Snapdragon dotati di una NPU Hexagon HTP (FP16), o CPU multithread ad alte prestazioni (FP32).\n• Alibaba MNN (OpenCL / Vulkan / NNAPI / CPU): Consigliato per tutti gli altri dispositivi, offre accelerazione hardware multipiattaforma su GPU Qualcomm Adreno, ARM Mali e Samsung Xclipse. L\'accelerazione Qualcomm Hexagon è anch\'essa supportata, ma con prestazioni inferiori rispetto a ONNX (~25% in meno).\n• FP16 vs FP32: L\'FP16 dimezza la larghezza di banda della memoria ed è richiesto per l\'accelerazione NPU. L\'FP32 fornisce la piena precisione ed evita l\'underflow su GPU e CPU potenti. L\'esecuzione di un modello FP32 con accelerazione NPU comporterà solitamente una quantizzazione FP16 al volo, motivo per cui vengono forniti modelli pre-quantizzati.</string>
+    <string name="model_info_desc" formatted="false">• ONNX Runtime (Hexagon HTP NPU &amp; CPU): Consigliato per processori Qualcomm Snapdragon dotati di una NPU Hexagon HTP (FP16), o CPU multithread ad alte prestazioni (FP32).\n• Alibaba MNN (OpenCL / Vulkan / NNAPI / CPU): Consigliato per tutti gli altri dispositivi, offre accelerazione hardware multipiattaforma su GPU Qualcomm Adreno, ARM Mali e Samsung Xclipse. L\'accelerazione Qualcomm Hexagon è anch\'essa supportata, ma con prestazioni inferiori rispetto a ONNX (~25% in meno).\n• Output Vocale vs Output Strumentale: Un modello con Output Vocale è ottimizzato per isolare ed amplificare le tracce vocali, mentre un modello con Output Strumentale si concentra sulla conservazione e sull\'enhancement degli elementi strumentali di una traccia. Entrambi i tipi di modelli possono essere utilizzati per la modalità Karaoke o Acapella di Sing. I modelli di Output Vocale tendono ad essere più leggeri e a richiedere meno potenza computazionale.\n• FP16 vs FP32: L\'FP16 dimezza la larghezza di banda della memoria ed è richiesto per l\'accelerazione NPU. L\'FP32 fornisce la piena precisione ed evita l\'underflow su GPU e CPU potenti. L\'esecuzione di un modello FP32 con accelerazione NPU comporterà solitamente una quantizzazione FP16 al volo, motivo per cui vengono forniti modelli pre-quantizzati.</string>
     <string name="badge_recommended">Consigliato</string>
     <string name="filter_family">Famiglia</string>
     <string name="filter_all_families">Tutte le famiglie</string>
-    <string name="filter_vocal">Voce</string>
-    <string name="filter_instrumental">Strumentale</string>
-    <string name="filter_backing_retention">Mantenimento cori</string>
+    <string name="filter_vocal">Output Vocale</string>
+    <string name="filter_instrumental">Output Strumentale</string>
+    <string name="filter_backing_retention">Conserva Cori</string>
     <string name="filter_no_models">Nessun modello corrisponde ai filtri selezionati</string>
     <string name="title_lyrics">Testi</string>
     <string name="title_lyrics_settings">Testi</string>

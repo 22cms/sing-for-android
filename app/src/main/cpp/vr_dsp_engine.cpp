@@ -34,7 +34,6 @@ void VrDspEngine::setWindowFrames(int frames) {
 
 void VrDspEngine::reset() {
     std::fill(cached_spec_.begin(), cached_spec_.end(), kiss_fft_cpx{0.0f, 0.0f});
-    std::fill(cached_band3_high_.begin(), cached_band3_high_.end(), kiss_fft_cpx{0.0f, 0.0f});
     std::fill(pcm_22k_.begin(), pcm_22k_.end(), 0.0f);
     std::fill(pcm_11k_.begin(), pcm_11k_.end(), 0.0f);
 }
@@ -76,7 +75,6 @@ void VrDspEngine::init_tables() {
     pcm_11k_.resize((chunk_samples_44k / 4) * 2);
 
     cached_spec_.resize(2 * VR_TOTAL_BINS * window_frames_);
-    cached_band3_high_.resize(2 * VR_BAND3_HIGH_BINS * window_frames_);
 }
 
 static void apply_reflect_pad(const float* in, int frames, int ch, int pad, std::vector<float>& padded) {
@@ -154,11 +152,16 @@ void VrDspEngine::forward(const float* stereo_pcm_44k, float* out_mag_tensor) {
 
             // Zero Nyquist bin 768
             cached_spec_[ch * plane + 768 * window_frames_ + t] = {0.0f, 0.0f};
+        }
 
-            // Cache upper bins [313..384] (18 kHz - 22.05 kHz) for high-frequency vocal extension
-            for (int bin = 313; bin < VR_BINS_HALF; ++bin) {
-                int high_idx = ch * (VR_BAND3_HIGH_BINS * window_frames_) + (bin - 313) * window_frames_ + t;
-                cached_band3_high_[high_idx] = fout[bin];
+        // --- Pre-filter bins [757..768) ---
+        for (int t = 0; t < window_frames_; ++t) {
+            float gp = 1.0f;
+            for (int b = 758; b < 768; ++b) {
+                float g = std::pow(10.0f, -(b - 757) * (3.5f - gp) / 20.0f);
+                gp = g;
+                cached_spec_[ch * plane + b * window_frames_ + t].r *= g;
+                cached_spec_[ch * plane + b * window_frames_ + t].i *= g;
             }
         }
     }
@@ -186,17 +189,6 @@ void VrDspEngine::forward(const float* stereo_pcm_44k, float* out_mag_tensor) {
                 float r = cached_spec_[idx].r;
                 float i = cached_spec_[idx].i;
                 out_mag_tensor[idx] = std::sqrt(r * r + i * i) * inv_max;
-            }
-        }
-
-        // Apply pre-filter roll-off strictly to the model input magnitude tensor on bins [758..768)
-        // (cached_spec_ is left untouched so inverse synthesis retains unattenuated audio)
-        for (int t = 0; t < window_frames_; ++t) {
-            float gp = 1.0f;
-            for (int b = 758; b < 768; ++b) {
-                float g = std::pow(10.0f, -(b - 757) * (3.5f - gp) / 20.0f);
-                gp = g;
-                out_mag_tensor[ch * plane + b * window_frames_ + t] *= g;
             }
         }
     }
@@ -285,19 +277,7 @@ void VrDspEngine::inverse(const float* in_mask_tensor, float* out_stereo_pcm_44k
             for (int bin = 14; bin < 322; ++bin) {
                 int in_bin = 278 + (bin - 14);
                 float mask = in_mask_tensor[ch * plane_mask + in_bin * roi_frames_ + t];
-                if (!extract_instrumental) {
-                    mask = 1.0f - mask;
-                    // Apply vocal aggression boost on mid-high vocal presence and sibilance (> 3.4 kHz)
-                    if (bin >= 120 && mask > 0.05f) {
-                        float bin_factor = (bin - 120.0f) / (321.0f - 120.0f);
-                        mask = std::min(1.0f, std::pow(mask, 1.0f - 0.35f * bin_factor));
-                    }
-                } else {
-                    if (bin >= 120 && mask < 0.95f) {
-                        float bin_factor = (bin - 120.0f) / (321.0f - 120.0f);
-                        mask = std::pow(mask, 1.0f + 0.35f * bin_factor);
-                    }
-                }
+                if (!extract_instrumental) mask = 1.0f - mask;
                 auto orig = cached_spec_[ch * plane_in + in_bin * window_frames_ + src_t];
                 spec_band[bin] = {orig.r * mask, orig.i * mask};
             }
@@ -321,47 +301,11 @@ void VrDspEngine::inverse(const float* in_mask_tensor, float* out_stereo_pcm_44k
             int src_t = OFFSET_FRAMES + t;
             std::fill(spec_band.begin(), spec_band.end(), kiss_fft_cpx{0.0f, 0.0f});
 
-            float top_vocal_mask_sum = 0.0f;
-            int top_count = 0;
-
             for (int bin = 131; bin < 313; ++bin) {
                 int in_bin = 278 + 308 + (bin - 131);
                 float mask = in_mask_tensor[ch * plane_mask + in_bin * roi_frames_ + t];
-                if (!extract_instrumental) {
-                    mask = 1.0f - mask;
-                    // Apply vocal aggression boost across full Band 3 (7.5 kHz - 18 kHz)
-                    if (mask > 0.05f) {
-                        float bin_factor = (bin - 131.0f) / (312.0f - 131.0f);
-                        mask = std::min(1.0f, std::pow(mask, 1.0f - (0.35f + 0.15f * bin_factor)));
-                    }
-                } else {
-                    if (mask < 0.95f) {
-                        float bin_factor = (bin - 131.0f) / (312.0f - 131.0f);
-                        mask = std::pow(mask, 1.0f + (0.35f + 0.15f * bin_factor));
-                    }
-                }
-
-                if (bin >= 300) {
-                    float v_val = (!extract_instrumental) ? mask : (1.0f - mask);
-                    top_vocal_mask_sum += v_val;
-                    top_count++;
-                }
-
+                if (!extract_instrumental) mask = 1.0f - mask;
                 auto orig = cached_spec_[ch * plane_in + in_bin * window_frames_ + src_t];
-                spec_band[bin] = {orig.r * mask, orig.i * mask};
-            }
-
-            // High-end extension for bins [313..384] (18 kHz to 22.05 kHz)
-            float top_vocal_avg = (top_count > 0) ? (top_vocal_mask_sum / top_count) : 0.0f;
-            for (int bin = 313; bin < VR_BINS_HALF; ++bin) {
-                int high_idx = ch * (VR_BAND3_HIGH_BINS * window_frames_) + (bin - 313) * window_frames_ + src_t;
-                auto orig = cached_band3_high_[high_idx];
-
-                // Smooth roll-off from top_vocal_avg towards Nyquist
-                float roll_off = 1.0f - 0.5f * ((bin - 313.0f) / static_cast<float>(VR_BAND3_HIGH_BINS));
-                float high_vocal_mask = std::clamp(top_vocal_avg * roll_off, 0.0f, 1.0f);
-
-                float mask = (!extract_instrumental) ? high_vocal_mask : (1.0f - high_vocal_mask);
                 spec_band[bin] = {orig.r * mask, orig.i * mask};
             }
 
