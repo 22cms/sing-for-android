@@ -13,6 +13,7 @@ namespace sing {
 constexpr int VR_N_FFT = 768;
 constexpr int VR_BINS_HALF = VR_N_FFT / 2 + 1; // 385
 constexpr int VR_TOTAL_BINS = 769;
+constexpr int VR_BAND3_HIGH_BINS = VR_BINS_HALF - 313; // 72 bins (18 kHz - 22.05 kHz)
 
 // Polyphase Half-Band filter for 2x decimation/interpolation
 struct HalfBand2x {
@@ -111,6 +112,10 @@ private:
     // Cached complex spectrogram: [ch 0..1][bin 0..768][t 0..window_frames-1]
     // Flat layout: ch * (VR_TOTAL_BINS * window_frames) + bin * window_frames + t
     std::vector<kiss_fft_cpx> cached_spec_;
+
+    // Cached high-end complex spectrogram for Band 3: [ch 0..1][bin 313..384][t 0..window_frames-1]
+    // Flat layout: ch * (VR_BAND3_HIGH_BINS * window_frames) + (bin - 313) * window_frames + t
+    std::vector<kiss_fft_cpx> cached_band3_high_;
 
     void init_tables();
 };
