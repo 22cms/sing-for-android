@@ -129,6 +129,13 @@ Java_org_francasio_sing_audio_VrDspEngine_nativeDestroy(JNIEnv* /*env*/, jobject
 }
 
 JNIEXPORT void JNICALL
+Java_org_francasio_sing_audio_VrDspEngine_nativeReset(
+        JNIEnv* /*env*/, jobject /*thiz*/, jlong handle) {
+    auto* engine = reinterpret_cast<sing::VrDspEngine*>(handle);
+    if (engine) engine->reset();
+}
+
+JNIEXPORT void JNICALL
 Java_org_francasio_sing_audio_VrDspEngine_nativeSetWindowFrames(
         JNIEnv* /*env*/, jobject /*thiz*/, jlong handle, jint windowFrames) {
     auto* engine = reinterpret_cast<sing::VrDspEngine*>(handle);

@@ -306,9 +306,11 @@ class SingAudioProcessor(
             val engine = aiEngine
 
             // If Sing is OFF or AI engine uninitialized: direct pass-through with 0% CPU and 0 latency
-            if (!singActive || engine == null) {
+            if (!singActive || engine == null || !isEngineReady) {
                 if (engine?.active == true) {
                     engine.deactivate()
+                    downResampler?.reset()
+                    upResampler?.reset()
                 }
                 passThrough(processorObj, inputBuffer)
                 try {
@@ -507,6 +509,11 @@ class SingAudioProcessor(
         aiEngine?.reset()
         downResampler?.reset()
         upResampler?.reset()
+        java.util.Arrays.fill(inFloats, 0.0f)
+        java.util.Arrays.fill(outFloats, 0.0f)
+        java.util.Arrays.fill(inShorts, 0.toShort())
+        java.util.Arrays.fill(resampledInFloats, 0.0f)
+        java.util.Arrays.fill(resampledOutFloats, 0.0f)
         smoothedLevel = vocalLevel
     }
 

@@ -101,8 +101,8 @@ class VocalControlHooks(
                     logInfo("LocalMediaPlayerController.setVocalAttenuationMode: mode=$mode (enabled=$enabled, wasSingActive=$wasSingActive, pos=$currentPosition ms, cushion=$cushionMs ms)")
                     val result = chain.proceed()
 
-                    if (wasSingActive && !enabled && currentPosition >= 0L) {
-                        val delayMs = if (cushionMs > 0L) cushionMs - 240L else 10800L
+                    if (wasSingActive && !enabled && currentPosition >= 0L && cushionMs > 240L) {
+                        val delayMs = cushionMs - 240L
                         mainHandler.postDelayed({
                             try {
                                 val activeController = currentPlayerController?.get() ?: controller

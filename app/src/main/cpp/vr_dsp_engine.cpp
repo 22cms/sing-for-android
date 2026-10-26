@@ -32,6 +32,12 @@ void VrDspEngine::setWindowFrames(int frames) {
     init_tables();
 }
 
+void VrDspEngine::reset() {
+    std::fill(cached_spec_.begin(), cached_spec_.end(), kiss_fft_cpx{0.0f, 0.0f});
+    std::fill(pcm_22k_.begin(), pcm_22k_.end(), 0.0f);
+    std::fill(pcm_11k_.begin(), pcm_11k_.end(), 0.0f);
+}
+
 static void compute_istft_norm(std::vector<float>& norm_table, int n_fft, int hop, int frames, const std::vector<float>& win) {
     int total_samples = (frames - 1) * hop;
     int padded_samples = total_samples + n_fft;

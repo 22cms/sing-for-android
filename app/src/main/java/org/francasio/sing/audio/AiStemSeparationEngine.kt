@@ -24,6 +24,7 @@ class AiStemSeparationEngine(
         const val CHUNK_SAMPLES = StftEngine.TOTAL_SAMPLES // 261,120 frames (~5.92s @ 44.1kHz)
         const val CROSSFADE_SAMPLES = 44100               // 44,100 frames (~1.0s crossfade between chunks)
         const val HOP_SAMPLES = CHUNK_SAMPLES - CROSSFADE_SAMPLES // 217,020 frames (~4.92s step, 1.4x+ real-time)
+        const val VR_CROSSFADE_SAMPLES = 16384           // 16,384 frames (~0.37s smooth crossfade)
         const val PRE_ROLL_FRAMES = CHUNK_SAMPLES + HOP_SAMPLES // 478,140 frames (~10.84s initial buffer)
         const val MAX_CUSHION_FRAMES = CHUNK_SAMPLES + 2 * HOP_SAMPLES // 695,160 frames (~15.76s max cushion)
         const val ECO_TARGET_CUSHION_FRAMES = CHUNK_SAMPLES // 261,120 frames (~5.92s target buffer)
@@ -127,6 +128,33 @@ class AiStemSeparationEngine(
     val isInstrumental: Boolean
         get() = currentBackend.modelInfo.isInstrumental
 
+    private fun flushBuffersLocked() {
+        java.util.Arrays.fill(inRing, 0.0f)
+        java.util.Arrays.fill(vocalRing, 0.0f)
+        java.util.Arrays.fill(centerRing, 0.0f)
+        java.util.Arrays.fill(chunkInPcm, 0.0f)
+        java.util.Arrays.fill(chunkStftTensor, 0.0f)
+        java.util.Arrays.fill(chunkVocalTensor, 0.0f)
+        java.util.Arrays.fill(chunkVocalPcm, 0.0f)
+        java.util.Arrays.fill(chunkCenterPcm, 0.0f)
+        java.util.Arrays.fill(chunkRawVocalPcm, 0.0f)
+        java.util.Arrays.fill(vrChunkInPcm, 0.0f)
+        java.util.Arrays.fill(vrInputTensor, 0.0f)
+        java.util.Arrays.fill(vrOutputTensor, 0.0f)
+        java.util.Arrays.fill(vrVocalPcm, 0.0f)
+        java.util.Arrays.fill(vrCenterPcm, 0.0f)
+        java.util.Arrays.fill(timeDomainInPcm, 0.0f)
+        java.util.Arrays.fill(timeDomainOutPcm, 0.0f)
+        java.util.Arrays.fill(timeDomainVocalPcm, 0.0f)
+        java.util.Arrays.fill(previousVocalPcm, 0.0f)
+        java.util.Arrays.fill(pendingVocalPcm, 0.0f)
+        java.util.Arrays.fill(centerContextPcm, 0.0f)
+        java.util.Arrays.fill(centerContextOutPcm, 0.0f)
+        pendingStartFrame = Long.MIN_VALUE
+        pendingGeneration = -1L
+        hasPreviousVocal = false
+    }
+
     fun updateBackend(newBackend: InferenceBackend) {
         lock.withLock {
             currentBackend = newBackend
@@ -140,6 +168,8 @@ class AiStemSeparationEngine(
             endOfStreamSignaled = false
             isBufferingInitialChunk = active
             newBackend.resetStates()
+            vrDspEngine.reset()
+            flushBuffersLocked()
             workCond.signalAll()
             pacingCond.signalAll()
             Log.i(TAG, "AI engine updated with new inference backend (${newBackend.providerName}, timeDomain=${newBackend.modelInfo.isTimeDomain})")
@@ -160,6 +190,8 @@ class AiStemSeparationEngine(
                 centerStartFrame = 0L
                 centerEndFrame = 0L
                 currentBackend.resetStates()
+                vrDspEngine.reset()
+                flushBuffersLocked()
                 workCond.signalAll()
                 pacingCond.signalAll()
                 Log.i(TAG, "AI engine activated")
@@ -181,6 +213,8 @@ class AiStemSeparationEngine(
                 centerStartFrame = 0L
                 centerEndFrame = 0L
                 currentBackend.resetStates()
+                vrDspEngine.reset()
+                flushBuffersLocked()
                 workCond.signalAll()
                 pacingCond.signalAll()
                 Log.i(TAG, "AI engine deactivated (0% CPU)")
@@ -233,7 +267,7 @@ class AiStemSeparationEngine(
                 active && vocalWriteFrames == 0L && ((inWriteFrames - inProcessedFrames) < needed)
             }
             isVr3Band -> {
-                val needed = vrDspEngine.chunkSamples
+                val needed = vrDspEngine.chunkSamples - VrDspEngine.OFFSET_FRAMES * 512
                 active && vocalWriteFrames == 0L && ((inWriteFrames - inProcessedFrames) < needed)
             }
             else -> {
@@ -247,7 +281,7 @@ class AiStemSeparationEngine(
                 active && ((inWriteFrames - inProcessedFrames) >= currentBackend.modelInfo.blockSize)
             }
             isVr3Band -> {
-                active && ((inWriteFrames - inProcessedFrames) >= vrDspEngine.chunkSamples)
+                active && ((inWriteFrames - inProcessedFrames) >= (vrDspEngine.chunkSamples - VrDspEngine.OFFSET_FRAMES * 512))
             }
             else -> {
                 active && ((inWriteFrames - inProcessedFrames) >= CHUNK_SAMPLES)
@@ -453,6 +487,8 @@ class AiStemSeparationEngine(
             endOfStreamSignaled = false
             isBufferingInitialChunk = active
             currentBackend.resetStates()
+            vrDspEngine.reset()
+            flushBuffersLocked()
             workCond.signalAll()
             pacingCond.signalAll()
         }
@@ -641,12 +677,15 @@ class AiStemSeparationEngine(
                 var myGen = 0L
                 var destFrame = 0L
                 val chunkSamples = vrDspEngine.chunkSamples
-                val roiSamples = vrDspEngine.roiSamples
+                val validSamples = vrDspEngine.validRoiSamples
+                val crossfadeSamples = VR_CROSSFADE_SAMPLES
+                val hopSamples = validSamples - crossfadeSamples
                 val offsetSamples = VrDspEngine.OFFSET_FRAMES * 512L
+                val minInputNeeded = chunkSamples - offsetSamples
 
                 lock.withLock {
                     while (running && (!active || (
-                        (inWriteFrames - inProcessedFrames) < (chunkSamples - offsetSamples) && !endOfStreamSignaled
+                        (inWriteFrames - inProcessedFrames) < minInputNeeded && !endOfStreamSignaled
                     ))) {
                         try {
                             workCond.await()
@@ -667,8 +706,12 @@ class AiStemSeparationEngine(
                         val framePos = chunkStartFrame + sampleOffset
                         val srcSample = if (framePos < 0) {
                             val srcFrame = -framePos
-                            val idx = (((srcFrame * 2 + ch) and (RING_MASK * 2 + 1).toLong())).toInt()
-                            inRing[idx]
+                            if (srcFrame < inWriteFrames) {
+                                val idx = (((srcFrame * 2 + ch) and (RING_MASK * 2 + 1).toLong())).toInt()
+                                inRing[idx]
+                            } else {
+                                0.0f
+                            }
                         } else if (framePos >= inWriteFrames) {
                             0.0f
                         } else {
@@ -677,7 +720,12 @@ class AiStemSeparationEngine(
                         }
                         vrChunkInPcm[i] = srcSample
                     }
-                    inProcessedFrames = destFrame + roiSamples
+
+                    if (endOfStreamSignaled && (inWriteFrames - destFrame) <= validSamples) {
+                        inProcessedFrames = inWriteFrames
+                    } else {
+                        inProcessedFrames = destFrame + hopSamples
+                    }
                 }
 
                 if (!running || !active) continue
@@ -694,38 +742,21 @@ class AiStemSeparationEngine(
                     vrDspEngine.inverse(vrOutputTensor, vrVocalPcm, isInstrumental = false)
                     val makeCenter = isPreserveSideActive
                     if (makeCenter) {
-                        stftEngine.centerCutPcm(vrVocalPcm, vrCenterPcm, roiSamples)
+                        stftEngine.centerCutPcm(vrVocalPcm, vrCenterPcm, validSamples)
                     }
                     val t1 = System.currentTimeMillis()
-                    Log.d(TAG, "VR 3-band chunk separated in ${t1 - t0} ms [fwd=${tDspFwd - t0}ms, nn=${tInf - tDspFwd}ms, inv=${t1 - tInf}ms] (roi: ${roiSamples / 44100.0}s, provider: ${currentBackend.providerName})")
+                    Log.d(TAG, "VR 3-band chunk separated in ${t1 - t0} ms [fwd=${tDspFwd - t0}ms, nn=${tInf - tDspFwd}ms, inv=${t1 - tInf}ms] (valid: ${validSamples / 44100.0}s, hop: ${hopSamples / 44100.0}s, provider: ${currentBackend.providerName})")
 
                     var isStale = false
                     lock.withLock {
                         if (!running || !active || myGen != seekGeneration.get()) {
                             isStale = true
                         } else {
-                            val targetEnd = destFrame + roiSamples
-
-                            for (i in 0 until roiSamples) {
-                                val framePos = destFrame + i
-                                if (framePos in 0 until inWriteFrames) {
-                                    val idx = ((framePos * 2) and (RING_MASK * 2 + 1).toLong()).toInt()
-                                    val sL = vrVocalPcm[i * 2]
-                                    val sR = vrVocalPcm[i * 2 + 1]
-                                    vocalRing[idx] = if (sL.isNaN() || sL.isInfinite()) 0.0f else sL
-                                    vocalRing[idx + 1] = if (sR.isNaN() || sR.isInfinite()) 0.0f else sR
-                                    if (makeCenter && isPreserveSideActive) {
-                                        centerRing[idx] = vrCenterPcm[i * 2]
-                                        centerRing[idx + 1] = vrCenterPcm[i * 2 + 1]
-                                    }
-                                }
-                            }
+                            writeVrVocalWithOverlapAdd(vrVocalPcm, destFrame, validSamples, crossfadeSamples)
                             if (makeCenter && isPreserveSideActive) {
-                                centerStartFrame = destFrame
-                                centerEndFrame = targetEnd
+                                writeVrCenterWithOverlapAdd(vrCenterPcm, destFrame, validSamples, crossfadeSamples)
                             }
 
-                            vocalWriteFrames = maxOf(vocalWriteFrames, minOf(inWriteFrames, targetEnd))
                             workCond.signalAll()
 
                             // Thermal pacing
@@ -863,6 +894,101 @@ class AiStemSeparationEngine(
                 }
             }
         }
+    }
+
+    private fun writeVrVocalWithOverlapAdd(
+        vocalPcm: FloatArray,
+        chunkDestFrame: Long,
+        validSamples: Int,
+        crossfadeSamples: Int
+    ) {
+        val targetEnd = chunkDestFrame + validSamples
+        val actualEnd = if (endOfStreamSignaled && inProcessedFrames >= inWriteFrames) {
+            minOf(inWriteFrames, targetEnd)
+        } else {
+            targetEnd
+        }
+
+        if (vocalWriteFrames == 0L) {
+            for (i in 0 until validSamples) {
+                val framePos = chunkDestFrame + i
+                val idx = ((framePos * 2) and (RING_MASK * 2 + 1).toLong()).toInt()
+                val sL = vocalPcm[i * 2]
+                val sR = vocalPcm[i * 2 + 1]
+                vocalRing[idx] = if (sL.isNaN() || sL.isInfinite()) 0.0f else sL
+                vocalRing[idx + 1] = if (sR.isNaN() || sR.isInfinite()) 0.0f else sR
+            }
+            vocalWriteFrames = actualEnd
+        } else {
+            val invCrossfade = 1.0f / crossfadeSamples.toFloat()
+            val overlapEnd = minOf(crossfadeSamples, validSamples)
+            for (i in 0 until overlapEnd) {
+                val framePos = chunkDestFrame + i
+                val idx = ((framePos * 2) and (RING_MASK * 2 + 1).toLong()).toInt()
+
+                val ramp = i * invCrossfade
+                val invRamp = 1.0f - ramp
+
+                val prevL = vocalRing[idx]
+                val prevR = vocalRing[idx + 1]
+                val currL = vocalPcm[i * 2]
+                val currR = vocalPcm[i * 2 + 1]
+
+                val sL = if (currL.isNaN() || currL.isInfinite()) 0.0f else currL
+                val sR = if (currR.isNaN() || currR.isInfinite()) 0.0f else currR
+
+                vocalRing[idx] = invRamp * prevL + ramp * sL
+                vocalRing[idx + 1] = invRamp * prevR + ramp * sR
+            }
+
+            for (i in overlapEnd until validSamples) {
+                val framePos = chunkDestFrame + i
+                val idx = ((framePos * 2) and (RING_MASK * 2 + 1).toLong()).toInt()
+                val sL = vocalPcm[i * 2]
+                val sR = vocalPcm[i * 2 + 1]
+                vocalRing[idx] = if (sL.isNaN() || sL.isInfinite()) 0.0f else sL
+                vocalRing[idx + 1] = if (sR.isNaN() || sR.isInfinite()) 0.0f else sR
+            }
+
+            vocalWriteFrames = maxOf(vocalWriteFrames, actualEnd)
+        }
+    }
+
+    private fun writeVrCenterWithOverlapAdd(
+        centerPcm: FloatArray,
+        chunkDestFrame: Long,
+        validSamples: Int,
+        crossfadeSamples: Int
+    ) {
+        val targetEnd = chunkDestFrame + validSamples
+        val actualEnd = if (endOfStreamSignaled && inProcessedFrames >= inWriteFrames) {
+            minOf(inWriteFrames, targetEnd)
+        } else {
+            targetEnd
+        }
+        val hasOverlap = centerEndFrame > chunkDestFrame
+        val overlap = if (hasOverlap) minOf(crossfadeSamples.toLong(), centerEndFrame - chunkDestFrame).toInt() else 0
+        val invCrossfade = if (overlap > 0) 1.0f / overlap.toFloat() else 1.0f
+
+        for (i in 0 until validSamples) {
+            val framePos = chunkDestFrame + i
+            val idx = ((framePos * 2) and (RING_MASK * 2 + 1).toLong()).toInt()
+            val sL = centerPcm[2 * i]
+            val sR = centerPcm[2 * i + 1]
+            val cleanL = if (sL.isNaN() || sL.isInfinite()) 0.0f else sL
+            val cleanR = if (sR.isNaN() || sR.isInfinite()) 0.0f else sR
+
+            if (i < overlap) {
+                val ramp = i * invCrossfade
+                centerRing[idx] = (1.0f - ramp) * centerRing[idx] + ramp * cleanL
+                centerRing[idx + 1] = (1.0f - ramp) * centerRing[idx + 1] + ramp * cleanR
+            } else {
+                centerRing[idx] = cleanL
+                centerRing[idx + 1] = cleanR
+            }
+        }
+        if (!hasOverlap) centerStartFrame = chunkDestFrame
+        centerEndFrame = maxOf(centerEndFrame, actualEnd)
     }
 
     private fun writeVocalWithOverlapAdd(vocalPcm: FloatArray, chunkStartFrame: Long) {

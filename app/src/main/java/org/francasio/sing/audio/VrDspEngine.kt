@@ -25,6 +25,9 @@ class VrDspEngine(windowFrames: Int = 512) : AutoCloseable {
         private external fun nativeSetWindowFrames(handle: Long, windowFrames: Int)
 
         @JvmStatic
+        private external fun nativeReset(handle: Long)
+
+        @JvmStatic
         private external fun nativeForward(handle: Long, stereoPcm: FloatArray, outTensor: FloatArray)
 
         @JvmStatic
@@ -43,6 +46,9 @@ class VrDspEngine(windowFrames: Int = 512) : AutoCloseable {
 
     val roiSamples: Int
         get() = roiFrames * 512
+
+    val validRoiSamples: Int
+        get() = (roiFrames - 1) * 512
 
     val inputTensorSize: Int
         get() = 2 * VR_TOTAL_BINS * windowFrames
@@ -68,6 +74,12 @@ class VrDspEngine(windowFrames: Int = 512) : AutoCloseable {
         require(inMaskTensor.size >= outputTensorSize)
         require(outStereoPcm.size >= roiSamples * 2)
         nativeInverse(nativeHandle, inMaskTensor, outStereoPcm, isInstrumental)
+    }
+
+    fun reset() {
+        if (nativeHandle != 0L) {
+            nativeReset(nativeHandle)
+        }
     }
 
     override fun close() {

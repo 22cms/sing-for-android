@@ -72,6 +72,9 @@ public:
     int getRoiFrames() const { return roi_frames_; }
     int getChunkSamples() const { return (window_frames_ - 1) * 512; }
     int getRoiSamples() const { return roi_frames_ * 512; }
+    int getValidRoiSamples() const { return (roi_frames_ - 1) * 512; }
+
+    void reset();
 
     // Forward 3-band analysis:
     // Takes interleaved stereo PCM at 44.1 kHz [chunkSamples * 2],

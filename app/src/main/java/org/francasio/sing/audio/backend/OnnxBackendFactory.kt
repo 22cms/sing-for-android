@@ -470,17 +470,19 @@ object OnnxBackendFactory {
                     if ((qnnDebug and 16) == 0) {
                         addConfigEntry("session.disable_cpu_ep_fallback", "1")
                     }
-                    // MDX-Net ONNX exports declare a dynamic "batch_size" dimension.
-                    // HTP needs static shapes: without an override the QNN EP leaves
-                    // shape-dependent nodes to the default CPU EP, and session
-                    // creation then fails because CPU fallback is disabled (see
-                    // above) - which silently degraded every run to CPU. The engine
-                    // always runs batch 1.
+                    // ONNX models declare dynamic dimensions (e.g. "batch_size" for MDX-Net,
+                    // "batch" and "time" for VR-Arch). HTP needs static shapes: without an override,
+                    // the QNN EP leaves shape-dependent nodes to the default CPU EP, and session
+                    // creation then fails because CPU fallback is disabled (see above) - which
+                    // silently degraded every run to CPU. The engine always runs batch 1.
+                    val timeFrames = if (modelInfo.isVr3Band && modelInfo.numFrames <= 256) 512L else modelInfo.numFrames.toLong()
                     try {
-                        setSymbolicDimensionValue("batch_size", 1)
-                        Log.i(TAG, "Pinned dynamic dimension batch_size=1 for QNN (static shapes for HTP)")
+                        setSymbolicDimensionValue("batch_size", 1L)
+                        setSymbolicDimensionValue("batch", 1L)
+                        setSymbolicDimensionValue("time", timeFrames)
+                        Log.i(TAG, "Pinned dynamic dimensions (batch_size=1, batch=1, time=$timeFrames) for QNN (static shapes for HTP)")
                     } catch (t: Throwable) {
-                        Log.w(TAG, "Could not pin batch_size for QNN: ${t.message}")
+                        Log.w(TAG, "Could not pin symbolic dimensions for QNN: ${t.message}")
                     }
                     val qnnOptions = mutableMapOf(
                         "backend_path" to qnnBackendPath,
