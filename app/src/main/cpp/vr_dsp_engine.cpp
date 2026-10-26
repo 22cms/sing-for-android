@@ -285,7 +285,19 @@ void VrDspEngine::inverse(const float* in_mask_tensor, float* out_stereo_pcm_44k
             for (int bin = 14; bin < 322; ++bin) {
                 int in_bin = 278 + (bin - 14);
                 float mask = in_mask_tensor[ch * plane_mask + in_bin * roi_frames_ + t];
-                if (!extract_instrumental) mask = 1.0f - mask;
+                if (!extract_instrumental) {
+                    mask = 1.0f - mask;
+                    // Apply vocal aggression boost on mid-high vocal presence and sibilance (> 3.4 kHz)
+                    if (bin >= 120 && mask > 0.05f) {
+                        float bin_factor = (bin - 120.0f) / (321.0f - 120.0f);
+                        mask = std::min(1.0f, std::pow(mask, 1.0f - 0.35f * bin_factor));
+                    }
+                } else {
+                    if (bin >= 120 && mask < 0.95f) {
+                        float bin_factor = (bin - 120.0f) / (321.0f - 120.0f);
+                        mask = std::pow(mask, 1.0f + 0.35f * bin_factor);
+                    }
+                }
                 auto orig = cached_spec_[ch * plane_in + in_bin * window_frames_ + src_t];
                 spec_band[bin] = {orig.r * mask, orig.i * mask};
             }
@@ -317,17 +329,15 @@ void VrDspEngine::inverse(const float* in_mask_tensor, float* out_stereo_pcm_44k
                 float mask = in_mask_tensor[ch * plane_mask + in_bin * roi_frames_ + t];
                 if (!extract_instrumental) {
                     mask = 1.0f - mask;
-                    // Apply vocal aggression boost on high-frequency consonants / sibilants (bins >= 200, ~11.5 kHz+)
-                    // to prevent vocal sibilance and whispering consonants from leaking into the subtracted instrumental
-                    if (bin >= 200 && mask > 0.05f) {
-                        float bin_factor = (bin - 200.0f) / (312.0f - 200.0f); // 0.0 to 1.0
-                        mask = std::min(1.0f, std::pow(mask, 1.0f - 0.35f * bin_factor));
+                    // Apply vocal aggression boost across full Band 3 (7.5 kHz - 18 kHz)
+                    if (mask > 0.05f) {
+                        float bin_factor = (bin - 131.0f) / (312.0f - 131.0f);
+                        mask = std::min(1.0f, std::pow(mask, 1.0f - (0.35f + 0.15f * bin_factor)));
                     }
                 } else {
-                    // For direct instrumental extraction, apply UVR aggression: mask_inst = mask_inst^(1 + alpha)
-                    if (bin >= 200 && mask < 0.95f) {
-                        float bin_factor = (bin - 200.0f) / (312.0f - 200.0f);
-                        mask = std::pow(mask, 1.0f + 0.35f * bin_factor);
+                    if (mask < 0.95f) {
+                        float bin_factor = (bin - 131.0f) / (312.0f - 131.0f);
+                        mask = std::pow(mask, 1.0f + (0.35f + 0.15f * bin_factor));
                     }
                 }
 
