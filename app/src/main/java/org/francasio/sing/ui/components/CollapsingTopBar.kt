@@ -6,6 +6,10 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.hoverable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsHoveredAsState
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.WindowInsets
@@ -180,6 +184,29 @@ fun BoxScope.ExpressiveCollapsingTopBar(
     // 2. Navigation Icon
     when (navigationIcon) {
         is NavigationIcon.Morphing -> {
+            val interactionSource = remember { MutableInteractionSource() }
+            val isHovered by interactionSource.collectIsHoveredAsState()
+            val isPressed by interactionSource.collectIsPressedAsState()
+            val isInteracting = isHovered || isPressed
+            var hasInteracted by remember { mutableStateOf(false) }
+
+            LaunchedEffect(isInteracting) {
+                if (progress > 0.4f) return@LaunchedEffect
+                if (isInteracting) {
+                    hasInteracted = true
+                    animationPlayed = true
+                    animProgress.animateTo(
+                        targetValue = 1f,
+                        animationSpec = tween(durationMillis = 350, easing = FastOutSlowInEasing)
+                    )
+                } else if (hasInteracted) {
+                    animProgress.animateTo(
+                        targetValue = 0f,
+                        animationSpec = tween(durationMillis = 350, easing = FastOutSlowInEasing)
+                    )
+                }
+            }
+
             val circleSize = 52.dp - (12.dp * progress)
             val circleX = 20.dp - (4.dp * progress)
             val circleStartY = statusBarTop + 24.dp
@@ -188,19 +215,12 @@ fun BoxScope.ExpressiveCollapsingTopBar(
 
             val t = animProgress.value
             val arrowScale = circleSize / 40.dp
-            val morphIconRotation = if (isSpawnAnimationRunning) t * 180f else 0f
-            val morphIconAlpha = if (isSpawnAnimationRunning) {
-                ((1f - t) * (1f - progress * 2f)).coerceIn(0f, 1f)
-            } else {
-                (1f - progress * 2f).coerceIn(0f, 1f)
-            }
+            val morphIconRotation = t * 180f
+            val morphIconAlpha = ((1f - t) * (1f - progress * 2f)).coerceIn(0f, 1f)
 
-            val morphArrowRotation = if (isSpawnAnimationRunning) -180f + (t * 180f) else 0f
-            val morphArrowAlpha = if (isSpawnAnimationRunning) {
-                t
-            } else {
-                if (progress > 0.4f) ((progress - 0.4f) * 2.5f).coerceIn(0f, 1f) else 0f
-            }
+            val morphArrowRotation = if (progress > 0.4f) 0f else -180f + (t * 180f)
+            val scrollArrowAlpha = if (progress > 0.4f) ((progress - 0.4f) * 2.5f).coerceIn(0f, 1f) else 0f
+            val morphArrowAlpha = maxOf(t, scrollArrowAlpha).coerceIn(0f, 1f)
 
             Box(
                 modifier = Modifier
@@ -208,11 +228,13 @@ fun BoxScope.ExpressiveCollapsingTopBar(
                     .size(circleSize)
                     .clip(CircleShape)
                     .background(SurfaceContainerHigh)
-                    .clickable {
-                        if (progress <= 0.05f && morphArrowAlpha <= 0.1f) {
-                            SingSettings.setBackTipLearned(context, true)
-                            isTipDisabled = true
-                        }
+                    .hoverable(interactionSource = interactionSource)
+                    .clickable(
+                        interactionSource = interactionSource,
+                        indication = androidx.compose.material3.ripple()
+                    ) {
+                        SingSettings.setBackTipLearned(context, true)
+                        isTipDisabled = true
                         navigationIcon.onBack()
                     },
                 contentAlignment = Alignment.Center
