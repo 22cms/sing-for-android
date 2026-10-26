@@ -49,6 +49,7 @@ import org.francasio.sing.ui.theme.AppleMusicSingTheme
 import org.francasio.sing.audio.backend.InferenceBackend
 import org.francasio.sing.audio.backend.OnnxBackendFactory
 import org.francasio.sing.audio.backend.OnnxInferenceBackend
+import org.francasio.sing.util.ModelDownloader
 import org.francasio.sing.util.ModelLoader
 import org.francasio.sing.R
 import org.francasio.sing.util.NativeLibDownloader
@@ -135,6 +136,7 @@ class MainActivity : ComponentActivity() {
         ModelLoader.loadModels(this)
         syncUiStatesWithSettings()
         bgExecutor.execute {
+            ModelDownloader.prewarmDownloadStates(this, ModelLoader.AVAILABLE_MODELS)
             ModelLoader.refreshModels(this)
             val update = UpdateChecker.check(
                 this,

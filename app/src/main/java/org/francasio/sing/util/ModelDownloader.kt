@@ -50,25 +50,39 @@ object ModelDownloader {
         if (getDownloadedModelFile(context, model.fileName) != null) {
             return true
         }
-        // Fallback: check host/module assets for embedded models
-        return try {
-            context.assets.open(model.fileName).use { true }
-        } catch (_: Throwable) {
-            try {
-                context.assets.open("assets/${model.fileName}").use { true }
+        // Only check assets for native Vi-NNet models
+        if (model.engine.equals(SingSettings.ENGINE_NATIVE, ignoreCase = true) || model.id.startsWith("apple_sing")) {
+            return try {
+                context.assets.open(model.fileName).use { true }
             } catch (_: Throwable) {
                 false
             }
         }
+        return false
     }
 
     fun getDownloadState(context: Context, model: ModelLoader.ModelInfo): DownloadState {
         val state = downloadStates[model.id]
         if (state != null) return state
-        return if (isModelDownloaded(context, model)) {
-            DownloadState.Completed
-        } else {
-            DownloadState.Idle
+        val isDown = isModelDownloaded(context, model)
+        val computed = if (isDown) DownloadState.Completed else DownloadState.Idle
+        downloadStates[model.id] = computed
+        return computed
+    }
+
+    fun prewarmDownloadStates(context: Context, models: List<ModelLoader.ModelInfo>) {
+        val appContext = context.applicationContext ?: context
+        executor.execute {
+            for (m in models) {
+                if (!downloadStates.containsKey(m.id)) {
+                    val isDown = isModelDownloaded(appContext, m)
+                    mainHandler.post {
+                        if (!downloadStates.containsKey(m.id)) {
+                            downloadStates[m.id] = if (isDown) DownloadState.Completed else DownloadState.Idle
+                        }
+                    }
+                }
+            }
         }
     }
 

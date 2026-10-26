@@ -29,6 +29,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
@@ -46,7 +47,9 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.withContext
 import org.francasio.sing.R
 import org.francasio.sing.ui.components.CollapsingTopBarDefaults
 import org.francasio.sing.ui.components.ExpressiveCollapsingTopBar
@@ -69,16 +72,28 @@ fun ModelSelectionScreen(
 ) {
     val context = LocalContext.current
 
-    val modelDefinitions = remember { mutableStateListOf<ModelLoader.ModelDefinition>() }
+    val modelDefinitions = remember {
+        mutableStateListOf<ModelLoader.ModelDefinition>().apply {
+            if (ModelLoader.MODEL_DEFINITIONS.isNotEmpty()) {
+                addAll(ModelLoader.MODEL_DEFINITIONS)
+            }
+        }
+    }
 
     LaunchedEffect(Unit) {
-        val initial = ModelLoader.loadModels(context)
-        modelDefinitions.clear()
-        modelDefinitions.addAll(initial)
+        if (modelDefinitions.isEmpty()) {
+            val initial = withContext(Dispatchers.IO) { ModelLoader.loadModels(context) }
+            if (initial.isNotEmpty()) {
+                modelDefinitions.clear()
+                modelDefinitions.addAll(initial)
+            }
+        }
 
         ModelLoader.refreshModels(context) { updated ->
-            modelDefinitions.clear()
-            modelDefinitions.addAll(updated)
+            if (modelDefinitions.toList() != updated) {
+                modelDefinitions.clear()
+                modelDefinitions.addAll(updated)
+            }
         }
     }
 
@@ -96,27 +111,26 @@ fun ModelSelectionScreen(
     var backingRetentionOnly by remember { mutableStateOf(false) }
     var selectedFamilyFilter by remember { mutableStateOf<String?>(null) }
 
-    val availableFamilies = remember(modelDefinitions.toList()) {
-        modelDefinitions.map { it.resolvedFamily }.distinct().filter { it.isNotBlank() }
+    val availableFamilies by remember {
+        derivedStateOf {
+            modelDefinitions.map { it.resolvedFamily }.distinct().filter { it.isNotBlank() }
+        }
     }
 
-    val visibleModelDefinitions = remember(
-        modelDefinitions.toList(),
-        selectedStemFilter,
-        backingRetentionOnly,
-        selectedFamilyFilter
-    ) {
-        modelDefinitions.filter { def ->
-            val matchesStem = selectedStemFilter == null || def.targetStem.equals(selectedStemFilter, ignoreCase = true)
-            val matchesBacking = !backingRetentionOnly || (def.keepsBackingVocals || def.versions.any { it.keepsBackingVocals })
-            val matchesFamily = selectedFamilyFilter == null || def.resolvedFamily.equals(selectedFamilyFilter, ignoreCase = true)
-            matchesStem && matchesBacking && matchesFamily
+    val visibleModelDefinitions by remember {
+        derivedStateOf {
+            modelDefinitions.filter { def ->
+                val matchesStem = selectedStemFilter == null || def.targetStem.equals(selectedStemFilter, ignoreCase = true)
+                val matchesBacking = !backingRetentionOnly || (def.keepsBackingVocals || def.versions.any { it.keepsBackingVocals })
+                val matchesFamily = selectedFamilyFilter == null || def.resolvedFamily.equals(selectedFamilyFilter, ignoreCase = true)
+                matchesStem && matchesBacking && matchesFamily
+            }
         }
     }
 
     LaunchedEffect(scrollToSelected, visibleModelDefinitions.size) {
         if (scrollToSelected && visibleModelDefinitions.isNotEmpty()) {
-            delay(150)
+            delay(300)
             val targetDef = visibleModelDefinitions.find { it.versions.any { v -> v.id == selectedModelId } || it.id == selectedModelId }
             if (targetDef != null) {
                 val y = cardPositions[targetDef.id]
