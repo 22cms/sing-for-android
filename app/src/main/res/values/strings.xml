@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name" translatable="false">Sing for Android</string>
-    <string name="xposed_description">A reimplementation of Apple Music Sing mode for Android with on-device Hardware accelerated stem separation.</string>
+    <string name="xposed_description" translatable="false">A reimplementation of Apple Music Sing mode for Android with HW accelerated stem separation.</string>
     <string name="open_apple_music">Launch Apple Music</string>
 
     <!-- Release notes (feature descriptions are English-only; update for each featured release) -->
@@ -30,16 +30,17 @@
     <string name="label_xposed_manager_name">Xposed Manager</string>
     <string name="label_neural_model">Neural Model</string>
     <string name="status_model_format">%1$s • %2$d threads</string>
-    <string name="title_model_selection">Neural Model</string>
-    <string name="desc_model_selection">Select the neural model architecture for real-time vocal isolation and attenuation.</string>
-    <string name="model_info_title">Hardware &amp; Precision</string>
+    <string name="title_model_selection">Neural Models</string>
+    <string name="desc_model_selection">Download and select the neural model that you wish to use for Sing</string>
+    <string name="model_info_title">Hardware, Precision &amp; Model Types</string>
     <string name="model_info_desc" formatted="false">• ONNX Runtime (Hexagon HTP NPU &amp; CPU): Recommended for Qualcomm Snapdragon processors equipped with a Hexagon HTP NPU (FP16), or high-performance multi-threaded CPUs (FP32).\n• Alibaba MNN (OpenCL / Vulkan / NNAPI / CPU): Recommended for all other devices, providing cross-platform hardware acceleration across Qualcomm Adreno, ARM Mali, and Samsung Xclipse GPUs. Qualcomm Hexagon acceleration is also supported, but with lower performance than ONNX (~25% less).\n• Vocal Output vs Instrumental Output: A Vocal Output model is optimized for isolating and boosting vocal tracks, while an Instrumental Output model focuses on preserving and enhancing the instrumental elements of a track. Both kinds of models can be used for Sing\'s Vocal Attenuation or Acapella mode. Vocal Output models tend to be more lightweight and require less computational power.\n• FP16 vs FP32: FP16 halves memory bandwidth and is required for NPU acceleration. FP32 provides exact full precision and prevents underflow on GPUs and powerful CPUs. Running an FP32 model under NPU acceleration will usually result in an on-the-fly FP16 quantization, hence prequantized models are provided.</string>
     <string name="badge_recommended">Recommended</string>
     <string name="filter_family">Family</string>
-    <string name="filter_all_families">All Families</string>
+    <string name="filter_all_families">All Model Families</string>
     <string name="filter_vocal">Vocal Output</string>
     <string name="filter_instrumental">Instrumental Output</string>
     <string name="filter_backing_retention">Backing Retention</string>
+    <string name="badge_keeps_backing_vocals">Backing Vocals Retained</string>
     <string name="filter_no_models">No models match the selected filters</string>
 
     <!-- Lyrics Settings -->
@@ -49,9 +50,8 @@
     <!-- Sing Settings -->
     <string name="title_sing_settings">Sing Settings</string>
     <string name="setting_preserve_side_title">Preserve Vocal Side Channel</string>
-    <string name="desc_preserve_side">Uses a spectral center cut to preserve backing vocals, reverb, and vocoder widening and other stereo effects.</string>
-    <string name="desc_preserve_side_disabled">The active model already retains backing vocals.</string>
-    <string name="badge_keeps_backing_vocals">Backing Vocals Retained</string>
+    <string name="desc_preserve_side">Uses a spectral center cut to preserve backing vocals, reverb, vocoder widening and other vocal stereo effects.</string>
+    <string name="desc_preserve_side_disabled">This model already retains backing vocals.</string>
 
     <string name="setting_two_way_slider_title">Two-Way Slider Mode</string>
     <string name="desc_two_way_slider" formatted="false">Splits the Sing slider range: 0–50% lowers vocals for Karaoke, while 50–100% lowers instrumentals to isolate vocals (acapella).</string>
@@ -60,26 +60,26 @@
     <string name="desc_center_group_lyrics">Horizontally centers collective, ensemble, and choir lyric lines in duet tracks.</string>
 
     <string name="setting_blur_unfocused_lyrics_title">Blur Unfocused Lyrics</string>
-    <string name="desc_blur_unfocused_lyrics">Applies a blur to lyric lines that are not currently being sung.</string>
+    <string name="desc_blur_unfocused_lyrics">Applies a variable blur effect to lyric lines that are not currently being sung.</string>
     <string name="setting_english_translation_fallback_title">English Translation Fallback</string>
-    <string name="desc_english_translation_fallback">Falls back to the English translation of lyrics when a translation is not available in the system language.</string>
+    <string name="desc_english_translation_fallback">Allows Apple's lyrics API to fallback to an english translation when one isn't available in the system language.</string>
     <string name="setting_full_vocal_mute_title">Remove Slider Limits</string>
-    <string name="setting_full_vocal_mute_desc" formatted="false">Unlocks 0% vocal floor (full mute) and allows to be set to 100% without disabling Sing Mode.</string>
+    <string name="setting_full_vocal_mute_desc" formatted="false">Unlocks 0% vocal floor (full mute) and allows the slider to be set to 100% without disabling Sing Mode.</string>
 
     <string name="setting_force_song_eligibility_title">Enable for All Songs</string>
-    <string name="desc_force_song_eligibility">Overrides server-side restrictions and missing lyrics timing to allow Sing on all tracks.</string>
+    <string name="desc_force_song_eligibility">Overrides server-side restrictions and ignores missing lyrics timing to allow Sing on all tracks.</string>
 
     <string name="setting_eco_mode_title">Allow Thermal Pacing</string>
     <string name="setting_eco_mode_desc">Pauses neural worker when audio buffer is comfortably ahead, might help reducing CPU load and thermals.</string>
 
     <string name="setting_force_cpu_title">Force CPU Inference</string>
     <string name="setting_force_cpu_desc">Disables GPU/NPU hardware acceleration and forces multi-threaded XNNPACK on CPU.</string>
-    <string name="setting_hardware_target_title">Hardware Accelerator</string>
-    <string name="setting_hardware_target_desc">Select compute target: NPU (Hexagon HTP), GPU (OpenCL/Vulkan), NNAPI, or multi-threaded CPU.</string>
-    <string name="hardware_target_npu_desc">Qualcomm Hexagon HTP / NPU (Fastest, low power)</string>
+    <string name="setting_hardware_target_title">Hardware Target</string>
+    <string name="setting_hardware_target_desc">Select compute target: NPU, GPU (OpenCL/Vulkan), NNAPI, or multi-threaded CPU.</string>
+    <string name="hardware_target_npu_desc">Your System-on-a-Chip's built-in NPU (Fastest, low power)</string>
     <string name="hardware_target_gpu_desc">OpenCL / Vulkan mobile GPU acceleration</string>
-    <string name="hardware_target_nnapi_desc">Android Neural Networks API acceleration</string>
-    <string name="hardware_target_cpu_desc">Multi-threaded CPU execution (Portable fallback)</string>
+    <string name="hardware_target_nnapi_desc">Android Neural Networks API acceleration (Deprecated)</string>
+    <string name="hardware_target_cpu_desc">Multi-threaded CPU execution (Slow, always available)</string>
     <string name="hardware_fallback_badge">Fallback: %1$s</string>
     <string name="hardware_fallback_desc">Active: %1$s (Hardware acceleration fallback)</string>
 
@@ -105,7 +105,7 @@
     <string name="benchmark_rtf_format">%1$.2fx Real-Time</string>
     <string name="benchmark_failed">Benchmark failed</string>
     <string name="benchmark_details_format" translatable="false">Chunk Processing: %1$d ms (Audio Window: 5,921 ms) • STFT (KissFFT 6144): %2$d ms • NN Inference (%3$s): %4$d ms • iSTFT Synthesis: %5$d ms</string>
-    <string name="verdict_fast_enough">Device is fast enough for real-time stem separation.</string>
+    <string name="verdict_fast_enough">Your device is fast enough for real-time stem separation. Get ready to Sing!</string>
     <string name="verdict_too_slow">Inference is slower than real-time audio playback. Audio underruns may occur.</string>
     <string name="status_not_loaded">Module Not Loaded</string>
     <string name="tip_not_loaded">Make sure the Sing for Android module is enabled in the Xposed Framework Manager of your choice.</string>
@@ -133,7 +133,7 @@
     <!-- Info Screen -->
     <string name="title_info">Info</string>
     <string name="action_info">Info</string>
-    <string name="info_app_subtitle">Real-Time Stem Separation for Apple Music</string>
+    <string name="info_app_subtitle">Real-Time Vocal Attenuation for Apple Music</string>
     <string name="info_theming_title">Appearance &amp; Theme</string>
     <string name="info_material_you_title">Material You Theme</string>
     <string name="info_material_you_desc">Dynamic color palette generated from your system wallpaper.</string>
