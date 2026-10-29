@@ -419,10 +419,10 @@ private fun ModelVersionRow(
     val isDownloaded = (downloadState is ModelDownloader.DownloadState.Completed)
     val isDownloading = (downloadState is ModelDownloader.DownloadState.Downloading)
 
-    val isQualcomm = remember { DeviceHelper.isQualcommWithHexagonHtp }
+    val hasNpuBackend = remember { DeviceHelper.isQualcommWithHexagonHtp || DeviceHelper.isMediatekWithNeuropilot }
     val isEnginePreferred = when {
         modelInfo.isViNNet || modelInfo.engine.equals(SingSettings.ENGINE_NATIVE, ignoreCase = true) -> false
-        isQualcomm && ModelLoader.isOnnxRuntimeAvailable -> modelInfo.engine.equals(SingSettings.ENGINE_ONNX, ignoreCase = true)
+        hasNpuBackend && ModelLoader.isOnnxRuntimeAvailable -> modelInfo.engine.equals(SingSettings.ENGINE_ONNX, ignoreCase = true)
         else -> modelInfo.engine.equals(SingSettings.ENGINE_MNN, ignoreCase = true)
     }
     val isPrecisionPreferred = modelInfo.precision.equals("fp16", ignoreCase = true) ||

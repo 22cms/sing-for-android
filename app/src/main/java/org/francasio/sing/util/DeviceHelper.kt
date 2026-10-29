@@ -35,6 +35,35 @@ object DeviceHelper {
     }
 
     /**
+     * Locate the on-device MediaTek Neuron runtime library, if present.
+     * Returns its absolute path or null when the device lacks the NPU runtime.
+     */
+    fun findNeuronRuntimeLibrary(): String? {
+        val candidateDirs = listOf(
+            "/vendor/lib64", "/vendor/lib",
+            "/system/lib64", "/system/lib",
+            "/odm/lib64", "/odm/lib",
+            "/product/lib64", "/product/lib"
+        )
+        val exactName = "libneuronusdk_adapter.mtk.so"
+        for (dir in candidateDirs) {
+            val f = java.io.File(dir, exactName)
+            if (f.exists() && f.canRead()) return f.absolutePath
+        }
+        // Fallback: any library whose name mentions neuron/neuropilot.
+        for (dir in candidateDirs) {
+            try {
+                val found = java.io.File(dir).listFiles()?.firstOrNull { f ->
+                    f.isFile && (f.name.contains("neuron", ignoreCase = true) ||
+                        f.name.contains("neuropilot", ignoreCase = true))
+                }
+                if (found != null) return found.absolutePath
+            } catch (_: Throwable) {}
+        }
+        return null
+    }
+
+    /**
      * Determines whether the current device is a Qualcomm device equipped with
      * a Hexagon Tensor Processor (HTP NPU).
      *
@@ -99,5 +128,42 @@ object DeviceHelper {
             "Hardware check: isQualcomm=$isQualcomm, socModel='$socModel', platform='$platform', board='$board', hardware='$hardware' -> isHexagonHtp=$detected"
         )
         detected
+    }
+
+    /**
+     * Whether the current device is a MediaTek SoC that ships a NeuroPilot NPU
+     * and can use the ONNX Runtime NeuroPilot execution provider.
+     */
+    val isMediatekWithNeuropilot: Boolean by lazy {
+        val hardware = Build.HARDWARE.lowercase()
+        val board = Build.BOARD.lowercase()
+        val socManufacturer = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            Build.SOC_MANUFACTURER.lowercase()
+        } else {
+            getSystemProperty("ro.soc.manufacturer").lowercase()
+        }
+        val platform = getSystemProperty("ro.board.platform").lowercase()
+        val socModel = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            Build.SOC_MODEL
+        } else {
+            getSystemProperty("ro.soc.model")
+        }
+
+        val isMediatek = socManufacturer.contains("mediatek") ||
+                socManufacturer.contains("mtk") ||
+                hardware.contains("mediatek") ||
+                board.contains("mediatek") ||
+                platform.startsWith("mt") ||
+                socModel.uppercase().startsWith("MT") ||
+                socModel.contains("DIMENSITY", ignoreCase = true)
+
+        // NeuroPilot is only usable if the on-device MediaTek Neuron runtime is
+        // actually present (libneuronusdk_adapter.mtk.so). Checking for it avoids
+        // false positives on MediaTek SKUs that lack the NPU runtime.
+        val neuronRuntime = findNeuronRuntimeLibrary()
+        val supported = isMediatek && neuronRuntime != null
+
+        Log.i(TAG, "MediaTek/NeuroPilot check: isMediatek=$isMediatek, neuronRuntime='$neuronRuntime', supported=$supported, socModel='$socModel', platform='$platform', socManufacturer='$socManufacturer'")
+        supported
     }
 }

@@ -24,6 +24,8 @@ object OnnxBackendFactory {
     private var onnxNativeLibsLoaded = false
     @Volatile
     private var vendorNativeLibsLoaded = false
+    @Volatile
+    private var neuroPilotRegistered = false
 
     /**
      * Diagnostic level (set via the benchmark intent extra "qnn_debug"): 0 off,
@@ -117,6 +119,10 @@ object OnnxBackendFactory {
                     NativeLibDownloader.downloadQnnRuntime(context, onProgress)
                 }
             }
+            if (DeviceHelper.isMediatekWithNeuropilot && !NativeLibDownloader.isNeuroPilotInstalled(context)) {
+                Log.i(TAG, "NeuroPilot runtime native libs missing - attempting download")
+                NativeLibDownloader.downloadNeuroPilotRuntime(context, onProgress)
+            }
             val vendorLibs = listOf(
                 "libc++.so", "ld-android.so", "libdl_android.so", "libbase.so",
                 "libdmabufheap.so", "libcutils.so", "libvndksupport.so", "libutils.so",
@@ -205,6 +211,10 @@ object OnnxBackendFactory {
                     Log.i(TAG, "QNN runtime native libs missing - attempting download")
                     NativeLibDownloader.downloadQnnRuntime(context, onProgress)
                 }
+            }
+            if (DeviceHelper.isMediatekWithNeuropilot && !NativeLibDownloader.isNeuroPilotInstalled(context)) {
+                Log.i(TAG, "NeuroPilot runtime native libs missing - attempting download")
+                NativeLibDownloader.downloadNeuroPilotRuntime(context, onProgress)
             }
 
             // ONNX Runtime + QNN accelerator are downloaded from Maven by
@@ -413,6 +423,57 @@ object OnnxBackendFactory {
         return null
     }
 
+    private fun findOrExtractNeuroPilotBackend(context: Context, moduleApkPath: String): String? {
+        if (!SingSettings.isArm64) return null
+        ensureOnnxNativeLibrariesLoaded(context, moduleApkPath)
+
+        val primaryAbi = android.os.Build.SUPPORTED_ABIS.firstOrNull() ?: "arm64-v8a"
+        val abiDirName = if (primaryAbi.startsWith("arm64")) "arm64" else primaryAbi
+
+        val nativeDir = File(context.applicationInfo.nativeLibraryDir)
+        val directEp = File(nativeDir, "libonnxruntime_providers_neuropilot.so")
+        if (directEp.exists() && directEp.canRead()) {
+            Log.i(TAG, "Found NeuroPilot EP in nativeLibraryDir: ${directEp.absolutePath}")
+            return directEp.absolutePath
+        }
+
+        val candidatePaths = listOf(moduleApkPath, SingSettings.resolvedModulePath ?: "")
+        for (apkPath in candidatePaths) {
+            if (apkPath.isNotEmpty()) {
+                val moduleLibDir = File(File(apkPath).parentFile, "lib/$abiDirName")
+                val moduleEp = File(moduleLibDir, "libonnxruntime_providers_neuropilot.so")
+                if (moduleEp.exists() && moduleEp.canRead()) {
+                    Log.i(TAG, "Found NeuroPilot EP in module lib dir: ${moduleEp.absolutePath}")
+                    return moduleEp.absolutePath
+                }
+            }
+        }
+
+        val cacheDir = File(context.cacheDir, "ort_libs_$primaryAbi")
+        val cachedEp = File(cacheDir, "libonnxruntime_providers_neuropilot.so")
+        if (cachedEp.exists() && cachedEp.length() > 0) {
+            Log.i(TAG, "Found NeuroPilot EP in cacheDir: ${cachedEp.absolutePath}")
+            return cachedEp.absolutePath
+        }
+
+        Log.w(TAG, "NeuroPilot EP library not found")
+        return null
+    }
+
+    private fun ensureNeuroPilotRegistered(env: OrtEnvironment, path: String) {
+        if (neuroPilotRegistered) return
+        synchronized(this) {
+            if (neuroPilotRegistered) return
+            try {
+                env.registerExecutionProviderLibrary("NeuroPilot", path)
+                neuroPilotRegistered = true
+                Log.i(TAG, "Registered NeuroPilot EP library: $path")
+            } catch (t: Throwable) {
+                Log.w(TAG, "Failed to register NeuroPilot EP library: ${t.message}")
+            }
+        }
+    }
+
     private fun createSessionWithBestProvider(
         context: Context,
         env: OrtEnvironment,
@@ -447,6 +508,41 @@ object OnnxBackendFactory {
                 return session
             } catch (e: Throwable) {
                 Log.w(TAG, "ONNX NNAPI unavailable for ${modelInfo.id} (${e.javaClass.simpleName}: ${e.message}) - falling back to CPU")
+            }
+        }
+
+        // 0. Try MediaTek NeuroPilot (NPU acceleration)
+        if (DeviceHelper.isMediatekWithNeuropilot) {
+            val npBackendPath = findOrExtractNeuroPilotBackend(context, moduleApkPath)
+            if (npBackendPath != null) {
+                try {
+                    Log.i(TAG, "Trying MediaTek NeuroPilot EP for ${modelInfo.id} (backend: $npBackendPath)...")
+                    ensureNeuroPilotRegistered(env, npBackendPath)
+                    val epDevices = env.getEpDevices().filter { it.epName == "NeuroPilotExecutionProvider" }
+                    if (epDevices.isNotEmpty()) {
+                        val opts = OrtSession.SessionOptions().apply {
+                            setOptimizationLevel(OrtSession.SessionOptions.OptLevel.ALL_OPT)
+                            setSessionLogLevel(OrtLoggingLevel.ORT_LOGGING_LEVEL_WARNING)
+                            setLoggerId("AppleSing_ORT")
+                            addExecutionProvider(epDevices, emptyMap())
+                        }
+                        val session = try {
+                            env.createSession(modelPath, opts)
+                        } finally {
+                            opts.close()
+                        }
+                        activeProviderShort = "ONNX NeuroPilot (MediaTek NPU)"
+                        activeProviderName = "${modelInfo.precision} via ONNX NeuroPilot (MediaTek NPU)"
+                        Log.i(TAG, "NeuroPilot session created successfully for ${modelInfo.id}")
+                        return session
+                    } else {
+                        Log.w(TAG, "No NeuroPilot EP device found after registration")
+                    }
+                } catch (e: Throwable) {
+                    Log.w(TAG, "NeuroPilot unavailable for ${modelInfo.id} (${e.javaClass.simpleName}: ${e.message}) - falling back to CPU")
+                }
+            } else {
+                Log.i(TAG, "NeuroPilot backend library not found - NPU not available for ${modelInfo.id}")
             }
         }
 

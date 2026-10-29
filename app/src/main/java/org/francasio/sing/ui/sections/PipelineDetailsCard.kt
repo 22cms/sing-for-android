@@ -224,7 +224,7 @@ fun PipelineDetailsCard(
                             SingSettings.TARGET_NNAPI -> !activeProvider.contains("NNAPI", ignoreCase = true)
                             else -> false
                         }
-                    } else hardwareTarget == SingSettings.TARGET_NPU && !DeviceHelper.isQualcommWithHexagonHtp
+                    } else hardwareTarget == SingSettings.TARGET_NPU && !(DeviceHelper.isQualcommWithHexagonHtp || DeviceHelper.isMediatekWithNeuropilot)
                 }
 
                 val actualHardwareDisplay = remember(hardwareTarget, activeProvider, isHardwareFallback) {

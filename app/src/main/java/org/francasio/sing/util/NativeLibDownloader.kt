@@ -15,6 +15,7 @@ object NativeLibDownloader {
     private const val ONNX_RUNTIME_VERSION = "1.29.0"
     private const val ONNX_RUNTIME_CPU_VERSION = "1.30.0"
     private const val QNN_RUNTIME_VERSION = "2.51.0"
+    private const val NEUROPILOT_VERSION = "0.2.0"
     private const val MAVEN_BASE = "https://repo1.maven.org/maven2"
 
     private val ONNX_AAR_URL =
@@ -23,6 +24,8 @@ object NativeLibDownloader {
         "$MAVEN_BASE/com/microsoft/onnxruntime/onnxruntime-android/$ONNX_RUNTIME_CPU_VERSION/onnxruntime-android-$ONNX_RUNTIME_CPU_VERSION.aar"
     private val QNN_AAR_URL =
         "$MAVEN_BASE/com/qualcomm/qti/qnn-runtime/$QNN_RUNTIME_VERSION/qnn-runtime-$QNN_RUNTIME_VERSION.aar"
+    private val NEUROPILOT_TGZ_URL =
+        "https://github.com/onnxruntime/onnxruntime-ep-neuropilot/releases/download/v$NEUROPILOT_VERSION/onnxruntime-ep-neuropilot-v$NEUROPILOT_VERSION-android-arm64-v8a.tar.gz"
 
     @Volatile
     var currentLabel: String = ""
@@ -63,6 +66,12 @@ object NativeLibDownloader {
     fun isQnnRuntimeInstalled(context: Context): Boolean {
         val dir = getLibsDir(context)
         return File(dir, "libQnnHtp.so").exists()
+    }
+
+    fun isNeuroPilotInstalled(context: Context): Boolean {
+        val dir = getLibsDir(context)
+        return File(dir, "libonnxruntime_providers_neuropilot.so").exists() &&
+            File(dir, "libneuron_op_capability.so").exists()
     }
 
     fun requiredSkeleton(context: Context): String? {
@@ -172,7 +181,7 @@ object NativeLibDownloader {
         currentLabel = safeGetString(context, R.string.downloading_onnx_runtime, "Downloading ONNX Runtime...")
         val dir = getLibsDir(context)
         val abi = android.os.Build.SUPPORTED_ABIS.firstOrNull() ?: "arm64-v8a"
-        val (url, tmpName) = if (abi.startsWith("arm64")) {
+        val (url, tmpName) = if (abi.startsWith("arm64") && DeviceHelper.isQualcommWithHexagonHtp) {
             ONNX_AAR_URL to "onnxruntime-android-qnn.aar.tmp"
         } else {
             ONNX_CPU_AAR_URL to "onnxruntime-android.aar.tmp"
@@ -235,6 +244,104 @@ object NativeLibDownloader {
         return File(dir, "libQnnHtp.so").exists()
     }
 
+    fun downloadNeuroPilotRuntime(context: Context, onProgress: (String, Float) -> Unit): Boolean {
+        currentLabel = "Downloading NeuroPilot EP..."
+        val dir = getLibsDir(context)
+        val tmpTgz = File(context.cacheDir, "neuropilot-ep.tgz.tmp")
+        val ok = downloadFile(NEUROPILOT_TGZ_URL, tmpTgz) { p ->
+            currentProgress = p * 0.7f
+            onProgress(currentLabel, currentProgress)
+        }
+        if (!ok) {
+            currentLabel = ""
+            return false
+        }
+        currentLabel = "Extracting NeuroPilot EP..."
+        currentProgress = 0.75f
+        onProgress(currentLabel, currentProgress)
+        extractTarGz(tmpTgz, dir, setOf("libonnxruntime_providers_neuropilot.so", "libneuron_op_capability.so"))
+        tmpTgz.delete()
+        currentProgress = 1f
+        onProgress(currentLabel, currentProgress)
+        currentLabel = ""
+        return File(dir, "libonnxruntime_providers_neuropilot.so").exists() &&
+            File(dir, "libneuron_op_capability.so").exists()
+    }
+
+    private fun extractTarGz(tgzFile: File, destDir: File, wanted: Set<String>) {
+        java.io.FileInputStream(tgzFile).use { fis ->
+            java.util.zip.GZIPInputStream(fis).use { gzis ->
+                val buf = ByteArray(512)
+                while (true) {
+                    // read header
+                    var read = 0
+                    while (read < 512) {
+                        val r = gzis.read(buf, read, 512 - read)
+                        if (r == -1) {
+                            if (read == 0) return
+                            // pad
+                            for (i in read until 512) buf[i] = 0
+                            break
+                        }
+                        read += r
+                    }
+                    if (read == 0) break
+                    // check end-of-archive (two zero blocks)
+                    if (buf.all { it == 0.toByte() }) break
+                    val nameBytes = buf.copyOfRange(0, 100)
+                    val name = String(nameBytes, Charsets.UTF_8).trimEnd('\u0000').trim()
+                    if (name.isEmpty()) break
+                    val sizeStr = String(buf.copyOfRange(124, 136), Charsets.UTF_8).trimEnd('\u0000').trim()
+                    val size = if (sizeStr.isEmpty()) 0L else sizeStr.toLong(8)
+                    val typeFlag = buf[156].toInt().toChar()
+                    val baseName = name.substringAfterLast('/')
+                    // skip data for non-regular or unwanted
+                    val isRegular = typeFlag == '\u0000' || typeFlag == '0'
+                    var toSkip = size
+                    if (isRegular && baseName in wanted) {
+                        val outFile = File(destDir, baseName)
+                        FileOutputStream(outFile).use { out ->
+                            var remaining = size
+                            val dataBuf = ByteArray(64 * 1024)
+                            while (remaining > 0) {
+                                val chunk = minOf(remaining, dataBuf.size.toLong()).toInt()
+                                val r = gzis.read(dataBuf, 0, chunk)
+                                if (r == -1) break
+                                out.write(dataBuf, 0, r)
+                                remaining -= r
+                            }
+                        }
+                        outFile.setReadable(true, false)
+                        outFile.setExecutable(true, false)
+                        Log.i(TAG, "Extracted $baseName")
+                        toSkip = 0
+                    }
+                    // skip remaining data
+                    if (toSkip > 0) {
+                        var remaining = toSkip
+                        val skipBuf = ByteArray(64 * 1024)
+                        while (remaining > 0) {
+                            val chunk = minOf(remaining, skipBuf.size.toLong()).toInt()
+                            val r = gzis.read(skipBuf, 0, chunk)
+                            if (r == -1) break
+                            remaining -= r
+                        }
+                    }
+                    // pad to 512
+                    val pad = (512 - (size % 512).toInt()) % 512
+                    if (pad > 0) {
+                        var skipped = 0
+                        while (skipped < pad) {
+                            val r = gzis.read(buf, 0, minOf(pad - skipped, 512))
+                            if (r == -1) break
+                            skipped += r
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     fun ensureOnnxRuntime(context: Context, onProgress: (String, Float) -> Unit): Boolean {
         if (!isOnnxRuntimeInstalled(context)) {
             if (!downloadOnnxRuntime(context, onProgress)) return false
@@ -243,6 +350,9 @@ object NativeLibDownloader {
             if (requiredSkeleton(context) != null) {
                 if (!downloadQnnRuntime(context, onProgress)) return false
             }
+        }
+        if (DeviceHelper.isMediatekWithNeuropilot && !isNeuroPilotInstalled(context)) {
+            if (!downloadNeuroPilotRuntime(context, onProgress)) return false
         }
         return true
     }
