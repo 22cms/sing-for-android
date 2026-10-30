@@ -62,7 +62,7 @@
     <string name="setting_blur_unfocused_lyrics_title">Blur Unfocused Lyrics</string>
     <string name="desc_blur_unfocused_lyrics">Applies a variable blur effect to lyric lines that are not currently being sung.</string>
     <string name="setting_english_translation_fallback_title">English Translation Fallback</string>
-    <string name="desc_english_translation_fallback">Allows Apple's lyrics API to fallback to an english translation when one isn't available in the system language.</string>
+    <string name="desc_english_translation_fallback">Allows Apple\'s lyrics API to fallback to an english translation when one isn\'t available in the system language.</string>
     <string name="setting_full_vocal_mute_title">Remove Slider Limits</string>
     <string name="setting_full_vocal_mute_desc" formatted="false">Unlocks 0% vocal floor (full mute) and allows the slider to be set to 100% without disabling Sing Mode.</string>
 
@@ -76,7 +76,7 @@
     <string name="setting_force_cpu_desc">Disables GPU/NPU hardware acceleration and forces multi-threaded XNNPACK on CPU.</string>
     <string name="setting_hardware_target_title">Hardware Target</string>
     <string name="setting_hardware_target_desc">Select compute target: NPU, GPU (OpenCL/Vulkan), NNAPI, or multi-threaded CPU.</string>
-    <string name="hardware_target_npu_desc">Your System-on-a-Chip's built-in NPU (Fastest, low power)</string>
+    <string name="hardware_target_npu_desc">Your System-on-a-Chip\'s built-in NPU (Fastest, low power)</string>
     <string name="hardware_target_gpu_desc">OpenCL / Vulkan mobile GPU acceleration</string>
     <string name="hardware_target_nnapi_desc">Android Neural Networks API acceleration (Deprecated)</string>
     <string name="hardware_target_cpu_desc">Multi-threaded CPU execution (Slow, always available)</string>

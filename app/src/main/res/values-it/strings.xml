@@ -39,9 +39,9 @@
     <string name="desc_center_group_lyrics">Centra orizzontalmente i versi cantati da cori o dal gruppo nei brani in duetto.</string>
 
     <string name="setting_blur_unfocused_lyrics_title">Sfoca Testi Non Attivi</string>
-    <string name="desc_blur_unfocused_lyrics">Applica un'effetto di sfocatura variabile ai versi non attualmente cantati.</string>
+    <string name="desc_blur_unfocused_lyrics">Applica un\'effetto di sfocatura variabile ai versi non attualmente cantati.</string>
     <string name="setting_english_translation_fallback_title">Ripiega sulla Traduzione Inglese</string>
-    <string name="desc_english_translation_fallback">Consente all'API dei testi Apple di ripiegarsi alla traduzione inglese quando non ne è disponibile una nella lingua di sistema.</string>
+    <string name="desc_english_translation_fallback">Consente all\'API dei testi Apple di ripiegarsi alla traduzione inglese quando non ne è disponibile una nella lingua di sistema.</string>
     <string name="setting_full_vocal_mute_title">Rimuovi i Limiti del Cursore</string>
     <string name="setting_full_vocal_mute_desc" formatted="false">Rimuove il livello minimo di volume sul cursore Sing, e gli consente di impostarlo al 100% senza azionarne la disattivazione.</string>
     <string name="setting_force_song_eligibility_title">Abilita per Tutti i Brani</string>
