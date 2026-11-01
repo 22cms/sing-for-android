@@ -17,4 +17,14 @@ class WhatsNewReleaseTest {
         assertTrue(WhatsNewRelease.shouldShow("previous-release", 100, 200))
         assertFalse(WhatsNewRelease.shouldShow(WhatsNewRelease.RELEASE_MARKER, 100, 200))
     }
+
+    @Test fun minorUpdateSuppressesPopupWhileDetectingUpdate() {
+        assertTrue(WhatsNewRelease.isAppUpdated("previous-release", 100, 200))
+        assertFalse(WhatsNewRelease.shouldShow("previous-release", 100, 200, isMinorUpdate = true))
+    }
+
+    @Test fun majorUpdateShowsPopupAndDetectsUpdate() {
+        assertTrue(WhatsNewRelease.isAppUpdated("previous-release", 100, 200))
+        assertTrue(WhatsNewRelease.shouldShow("previous-release", 100, 200, isMinorUpdate = false))
+    }
 }

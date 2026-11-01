@@ -123,13 +123,18 @@ class MainActivity : ComponentActivity() {
         val packageInfo = packageManager.getPackageInfo(packageName, 0)
         val whatsNewPrefs = getSharedPreferences(WhatsNewRelease.PREFS_NAME, MODE_PRIVATE)
         val lastSeenRelease = whatsNewPrefs.getString(WhatsNewRelease.KEY_LAST_SEEN_RELEASE, null)
-        val isUpdated = WhatsNewRelease.shouldShow(
+        val isUpdated = WhatsNewRelease.isAppUpdated(
             lastSeenRelease,
             packageInfo.firstInstallTime,
             packageInfo.lastUpdateTime
         )
-        showWhatsNewState.value = isUpdated
-        if (!showWhatsNewState.value && lastSeenRelease == null) {
+        showWhatsNewState.value = WhatsNewRelease.shouldShow(
+            lastSeenRelease,
+            packageInfo.firstInstallTime,
+            packageInfo.lastUpdateTime,
+            isMinorUpdate = org.francasio.sing.provider.IS_MINOR_UPDATE
+        )
+        if (!showWhatsNewState.value && (isUpdated || lastSeenRelease == null)) {
             whatsNewPrefs.edit().putString(WhatsNewRelease.KEY_LAST_SEEN_RELEASE, WhatsNewRelease.RELEASE_MARKER).apply()
         }
 

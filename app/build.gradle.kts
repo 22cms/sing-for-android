@@ -10,19 +10,22 @@ import org.gradle.api.tasks.TaskAction
 
 abstract class GenerateEngineVersion : DefaultTask() {
     @get:Input abstract val versionName: Property<String>
+    @get:Input abstract val minorUpdate: Property<Boolean>
     @get:OutputDirectory abstract val outputDirectory: DirectoryProperty
 
     @TaskAction
     fun generate() {
         val escaped = versionName.get().replace("\\", "\\\\").replace("\"", "\\\"")
+        val minor = minorUpdate.get()
         val source = outputDirectory.file("org/francasio/sing/provider/EngineVersion.kt").get().asFile
         source.parentFile.mkdirs()
         source.writeText("""
             package org.francasio.sing.provider
 
-            // Generated from app/build.gradle.kts versionName. Inlined into the
+            // Generated from app/build.gradle.kts versionName and isMinorUpdate. Inlined into the
             // injected engine so LSPatch reports its embedded build, not the installed app.
             internal const val ENGINE_VERSION = "$escaped"
+            internal const val IS_MINOR_UPDATE = $minor
         """.trimIndent() + "\n")
     }
 }
@@ -32,6 +35,9 @@ plugins {
     id("org.jetbrains.kotlin.android")
     id("org.jetbrains.kotlin.plugin.compose") version "2.0.0"
 }
+
+// Mark this release as minor: suppresses the update pop-up while preserving other update mechanisms.
+var isMinorUpdate = true
 
 android {
     namespace = "org.francasio.sing"
@@ -210,6 +216,7 @@ androidComponents {
             "generate${variant.name.replaceFirstChar { it.uppercase() }}EngineVersion"
         ) {
             versionName.set(android.defaultConfig.versionName!!)
+            minorUpdate.set(isMinorUpdate)
             outputDirectory.set(layout.buildDirectory.dir("generated/engineVersion/${variant.name}"))
         }
         kotlin.sourceSets.getByName(variant.name).kotlin.srcDir(generateEngineVersion)
