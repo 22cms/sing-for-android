@@ -11,10 +11,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.Close
-import androidx.compose.material.icons.outlined.Warning
-import androidx.compose.material.icons.outlined.CheckCircle
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -22,6 +18,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -66,7 +63,7 @@ fun StatusCard(
                                 if (isModuleVersionMismatch) {
                                    if (isMaterialYou) DefaultYellowError else DefaultYellowError.copy(alpha = 0.2f)
                                 } else if (isModuleLoaded) {
-                                    if (isMaterialYou) Primary else Primary.copy(alpha = 0.15f)
+                                    if (isMaterialYou) Primary else TextPrimary.copy(alpha = 0.15f)
                                 } else {
                                     TextSecondary.copy(alpha = 0.15f)
                                 }
@@ -74,13 +71,13 @@ fun StatusCard(
                         contentAlignment = Alignment.Center
                     ) {
                         Icon(
-                            imageVector = if (isModuleVersionMismatch) Icons.Outlined.Warning
-                            else if (isModuleLoaded) Icons.Outlined.CheckCircle else Icons.Outlined.Close,
+                            painter = if (isModuleVersionMismatch) painterResource(id = R.drawable.ic_warning_sign)
+                            else if (isModuleLoaded) painterResource(id = R.drawable.ic_checkmark_circle) else painterResource(id = R.drawable.ic_xmark_circle),
                             contentDescription = null,
                             tint = if (isModuleVersionMismatch) {
                                 if (isMaterialYou) Accent2_900 else DefaultYellowError
                             } else if (isModuleLoaded) {
-                                if (isMaterialYou) Accent2_900 else Primary
+                                if (isMaterialYou) Accent2_900 else TextPrimary
                             } else {
                                 TextSecondary
                             },
