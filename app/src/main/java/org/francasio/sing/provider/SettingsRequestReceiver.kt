@@ -7,6 +7,20 @@ import android.util.Log
 
 class SettingsRequestReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
+        if (intent.action == Intent.ACTION_MY_PACKAGE_REPLACED) {
+            Log.i("AppleSing_Settings", "App updated (MY_PACKAGE_REPLACED): re-fetching models.json...")
+            org.francasio.sing.util.ModelLoader.refreshModels(context) {
+                val selectedId = SingSettings.selectedModelId
+                val updatedInfo = org.francasio.sing.util.ModelLoader.findCatalogModel(selectedId)
+                if (updatedInfo != null) {
+                    org.francasio.sing.util.ModelLoader.saveSelectedModel(context, updatedInfo)
+                    val reply = SingSettings.createSettingsUpdateIntent(context, "com.apple.android.music")
+                    context.sendBroadcast(reply)
+                }
+            }
+            return
+        }
+
         if (intent.action == SingSettings.ACTION_REQUEST_SETTINGS) {
             val ts = intent.getLongExtra("timestamp", System.currentTimeMillis())
             val manager = intent.getStringExtra("manager_info") ?: "LSPatch"

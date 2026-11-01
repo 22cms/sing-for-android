@@ -123,11 +123,12 @@ class MainActivity : ComponentActivity() {
         val packageInfo = packageManager.getPackageInfo(packageName, 0)
         val whatsNewPrefs = getSharedPreferences(WhatsNewRelease.PREFS_NAME, MODE_PRIVATE)
         val lastSeenRelease = whatsNewPrefs.getString(WhatsNewRelease.KEY_LAST_SEEN_RELEASE, null)
-        showWhatsNewState.value = WhatsNewRelease.shouldShow(
+        val isUpdated = WhatsNewRelease.shouldShow(
             lastSeenRelease,
             packageInfo.firstInstallTime,
             packageInfo.lastUpdateTime
         )
+        showWhatsNewState.value = isUpdated
         if (!showWhatsNewState.value && lastSeenRelease == null) {
             whatsNewPrefs.edit().putString(WhatsNewRelease.KEY_LAST_SEEN_RELEASE, WhatsNewRelease.RELEASE_MARKER).apply()
         }
@@ -137,7 +138,15 @@ class MainActivity : ComponentActivity() {
         syncUiStatesWithSettings()
         bgExecutor.execute {
             ModelDownloader.prewarmDownloadStates(this, ModelLoader.AVAILABLE_MODELS)
-            ModelLoader.refreshModels(this)
+            ModelLoader.refreshModels(this) {
+                if (isUpdated) {
+                    val updatedInfo = ModelLoader.findCatalogModel(SingSettings.selectedModelId)
+                    if (updatedInfo != null) {
+                        ModelLoader.saveSelectedModel(this, updatedInfo)
+                        SingSettings.broadcastSettings(this)
+                    }
+                }
+            }
             val update = UpdateChecker.check(
                 this,
                 packageInfo.versionName ?: XposedStatus.getAppVersion(this)

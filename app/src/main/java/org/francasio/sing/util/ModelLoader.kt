@@ -268,7 +268,7 @@ object ModelLoader {
                 lookaheadSize = obj.optInt("lookaheadSize", 16384),
                 numBins = obj.optInt("numBins", 2048),
                 numFrames = obj.optInt("numFrames", 256),
-                fftSize = obj.optInt("fftSize", 6144),
+                fftSize = obj.optInt("fftSize", if (id.contains("kim", ignoreCase = true)) 7680 else 6144),
                 compensation = obj.optDouble("compensation", if (id.contains("kim", ignoreCase = true)) 1.02 else 1.035).toFloat(),
                 hopSize = obj.optInt("hopSize", 1024),
                 chunkSamples = obj.optInt("chunkSamples", 261120),
@@ -376,7 +376,8 @@ object ModelLoader {
             val lookaheadSize = mObj.optInt("lookaheadSize", 16384)
             val numBins = mObj.optInt("numBins", 2048)
             val numFrames = mObj.optInt("numFrames", 256)
-            val fftSize = mObj.optInt("fftSize", 6144)
+            val defaultFft = if (mId.contains("kim", ignoreCase = true)) 7680 else 6144
+            val fftSize = mObj.optInt("fftSize", defaultFft)
             val compensation = mObj.optDouble("compensation", if (mId.contains("kim", ignoreCase = true)) 1.02 else 1.035).toFloat()
             val hopSize = mObj.optInt("hopSize", 1024)
             val chunkSamples = mObj.optInt("chunkSamples", 261120)

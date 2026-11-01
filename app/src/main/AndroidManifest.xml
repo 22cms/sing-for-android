@@ -36,6 +36,7 @@
             android:exported="true">
             <intent-filter>
                 <action android:name="org.francasio.sing.REQUEST_SETTINGS" />
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
             </intent-filter>
         </receiver>
 
