@@ -322,17 +322,18 @@ class SingXposedEntry : XposedModule() {
         }
 
         fun setVocalSliderFractionField(vocalCtrl: View, value: Float) {
+            val safeValue = if (value.isNaN() || value.isInfinite()) 0.0f else value.coerceIn(0.0f, 1.0f)
             try {
-                ReflectionUtils.setFloatField(vocalCtrl, "H", value)
+                ReflectionUtils.setFloatField(vocalCtrl, "H", safeValue)
             } catch (_: Throwable) {}
             try {
-                ReflectionUtils.setFloatField(vocalCtrl, "sliderFraction", value)
+                ReflectionUtils.setFloatField(vocalCtrl, "sliderFraction", safeValue)
             } catch (_: Throwable) {}
         }
 
         private var pendingVocalFraction: Float? = null
         private val debouncedPlayerSyncRunnable = Runnable {
-            val fraction = pendingVocalFraction ?: return@Runnable
+            val fraction = pendingVocalFraction?.takeIf { !it.isNaN() && !it.isInfinite() }?.coerceIn(0.0f, 1.0f) ?: return@Runnable
             instance?.vocalControlHooks?.syncPlayerVocalLevel(fraction)
             try {
                 currentVocalCtrl?.get()?.let { vocalCtrl ->
@@ -345,11 +346,12 @@ class SingXposedEntry : XposedModule() {
         }
 
         fun updateVocalSliderUi(vocalCtrl: View, fraction: Float) {
+            val safeFraction = if (fraction.isNaN() || fraction.isInfinite()) 0.0f else fraction.coerceIn(0.0f, 1.0f)
             try {
-                ReflectionUtils.callMethod(vocalCtrl, "setSliderFraction", fraction)
+                ReflectionUtils.callMethod(vocalCtrl, "setSliderFraction", safeFraction)
             } catch (_: Throwable) {}
 
-            setVocalSliderFractionField(vocalCtrl, fraction)
+            setVocalSliderFractionField(vocalCtrl, safeFraction)
 
             try {
                 val binding = ReflectionUtils.getObjectField(vocalCtrl, "e")

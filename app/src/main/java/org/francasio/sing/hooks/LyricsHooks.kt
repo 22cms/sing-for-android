@@ -341,10 +341,11 @@ class LyricsHooks(
 
                 ReflectionUtils.findMethod(vacClass, "setSliderFraction", java.lang.Float.TYPE)?.let { m ->
                     hookMethod(m) { chain ->
-                        val fraction = chain.getArg(0) as Float
+                        val rawFraction = (chain.getArg(0) as? Number)?.toFloat() ?: 0f
+                        val fraction = if (rawFraction.isNaN() || rawFraction.isInfinite()) 0.0f else rawFraction.coerceIn(0.0f, 1.0f)
                         val vocalCtrl = chain.thisObject as View
                         currentVocalCtrl = WeakReference(vocalCtrl)
-                        val res = chain.proceed()
+                        val res = chain.proceed(arrayOf(fraction))
                         updateSliderIcon(vocalCtrl, fraction)
                         res
                     }

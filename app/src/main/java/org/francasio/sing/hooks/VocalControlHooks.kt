@@ -61,17 +61,19 @@ class VocalControlHooks(
             )?.let { method ->
                 hookMethod(method) { chain ->
                     currentPlayerController = WeakReference(chain.thisObject)
-                    val rawLevel = chain.getArg(0) as Float
+                    val rawLevel = (chain.getArg(0) as? Number)?.toFloat() ?: 0f
                     val floor = defaultVocalFloor()
-                    val level = if (SingSettings.allowZeroFloor) {
+                    val level = if (rawLevel.isNaN() || rawLevel.isInfinite()) {
+                        0.0f
+                    } else if (SingSettings.allowZeroFloor) {
                         when {
                             rawLevel <= 0.005f || (floor != null && rawLevel <= floor + 0.002f) -> 0.0f
                             rawLevel >= 0.995f -> 1.0f
                             else -> rawLevel.coerceIn(0.0f, 1.0f)
                         }
-                    } else rawLevel
+                    } else rawLevel.coerceIn(0.0f, 1.0f)
                     audioProcessor()?.vocalLevel = level
-                    currentVocalControl()?.let { updateSliderIcon(it, rawLevel) }
+                    currentVocalControl()?.let { updateSliderIcon(it, level) }
                     logInfo("Vocal level changed to: $level (raw: $rawLevel, allowZeroFloor=${SingSettings.allowZeroFloor})")
                     chain.proceed(arrayOf(level))
                 }
@@ -133,9 +135,10 @@ class VocalControlHooks(
     }
 
     fun syncPlayerVocalLevel(fraction: Float) {
+        val safeFraction = if (fraction.isNaN() || fraction.isInfinite()) 0.0f else fraction.coerceIn(0.0f, 1.0f)
         try {
             currentPlayerController?.get()?.let {
-                ReflectionUtils.callMethod(it, "setVocalAttenuationLevel", fraction)
+                ReflectionUtils.callMethod(it, "setVocalAttenuationLevel", safeFraction)
             }
         } catch (_: Throwable) {}
     }
