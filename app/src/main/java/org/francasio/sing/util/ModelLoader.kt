@@ -90,6 +90,7 @@ object ModelLoader {
         val numBins: Int = 2048,
         val numFrames: Int = 256,
         val fftSize: Int = 6144,
+        val compensation: Float = 1.035f,
         val hopSize: Int = 1024,
         val chunkSamples: Int = 261120,
         val crossfadeSamples: Int = 44100,
@@ -143,6 +144,7 @@ object ModelLoader {
         val numBins: Int = 2048,
         val numFrames: Int = 256,
         val fftSize: Int = 6144,
+        val compensation: Float = 1.035f,
         val hopSize: Int = 1024,
         val chunkSamples: Int = 261120,
         val crossfadeSamples: Int = 44100,
@@ -214,6 +216,7 @@ object ModelLoader {
                 put("numBins", info.numBins)
                 put("numFrames", info.numFrames)
                 put("fftSize", info.fftSize)
+                put("compensation", info.compensation.toDouble())
                 put("hopSize", info.hopSize)
                 put("chunkSamples", info.chunkSamples)
                 put("crossfadeSamples", info.crossfadeSamples)
@@ -266,6 +269,7 @@ object ModelLoader {
                 numBins = obj.optInt("numBins", 2048),
                 numFrames = obj.optInt("numFrames", 256),
                 fftSize = obj.optInt("fftSize", 6144),
+                compensation = obj.optDouble("compensation", if (id.contains("kim", ignoreCase = true)) 1.02 else 1.035).toFloat(),
                 hopSize = obj.optInt("hopSize", 1024),
                 chunkSamples = obj.optInt("chunkSamples", 261120),
                 crossfadeSamples = obj.optInt("crossfadeSamples", 44100),
@@ -373,6 +377,7 @@ object ModelLoader {
             val numBins = mObj.optInt("numBins", 2048)
             val numFrames = mObj.optInt("numFrames", 256)
             val fftSize = mObj.optInt("fftSize", 6144)
+            val compensation = mObj.optDouble("compensation", if (mId.contains("kim", ignoreCase = true)) 1.02 else 1.035).toFloat()
             val hopSize = mObj.optInt("hopSize", 1024)
             val chunkSamples = mObj.optInt("chunkSamples", 261120)
             val crossfadeSamples = mObj.optInt("crossfadeSamples", 44100)
@@ -452,6 +457,7 @@ object ModelLoader {
                             numBins = numBins,
                             numFrames = numFrames,
                             fftSize = fftSize,
+                            compensation = compensation,
                             hopSize = hopSize,
                             chunkSamples = chunkSamples,
                             crossfadeSamples = crossfadeSamples,
@@ -487,6 +493,7 @@ object ModelLoader {
                         numBins = numBins,
                         numFrames = numFrames,
                         fftSize = fftSize,
+                        compensation = compensation,
                         hopSize = hopSize,
                         chunkSamples = chunkSamples,
                         crossfadeSamples = crossfadeSamples,

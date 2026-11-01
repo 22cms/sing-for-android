@@ -48,8 +48,10 @@ object NativeLibDownloader {
         // Invalidate stale caches (e.g. arm64 libs left on an x86_64 device).
         val wantMachine = if ((android.os.Build.SUPPORTED_ABIS.firstOrNull() ?: "").startsWith("arm64")) 0x00B7 else 0x003E
         try {
-            val hdr = ort.inputStream().use { it.readNBytes(20) }
-            if (hdr.size >= 20) {
+            val buf = ByteArray(20)
+            val bytesRead = ort.inputStream().use { it.read(buf) }
+            if (bytesRead >= 20) {
+                val hdr = buf
                 val eMachine = (hdr[19].toInt() and 0xff) shl 8 or (hdr[18].toInt() and 0xff)
                 if (eMachine != 0x0000 && eMachine != wantMachine) {
                     dir.listFiles()?.forEach { it.delete() }
@@ -68,7 +70,11 @@ object NativeLibDownloader {
     fun requiredSkeleton(context: Context): String? {
         val abi = android.os.Build.SUPPORTED_ABIS.firstOrNull() ?: "arm64-v8a"
         if (!abi.startsWith("arm64")) return null
-        var soc = android.os.Build.SOC_MODEL.uppercase()
+        var soc = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) {
+            android.os.Build.SOC_MODEL.uppercase()
+        } else {
+            ""
+        }
         if (soc.isBlank() || soc == "UNKNOWN") {
             try {
                 java.io.File("/proc/cpuinfo").readText().let { txt ->

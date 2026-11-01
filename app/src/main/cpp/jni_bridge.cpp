@@ -20,6 +20,14 @@ Java_org_francasio_sing_audio_StftEngine_nativeDestroy(JNIEnv* /*env*/, jobject 
 }
 
 JNIEXPORT void JNICALL
+Java_org_francasio_sing_audio_StftEngine_nativeConfigure(
+        JNIEnv* /*env*/, jobject /*thiz*/, jlong handle, jint fft_size, jfloat compensation, jboolean is_instrumental) {
+    auto* engine = reinterpret_cast<sing::StftEngine*>(handle);
+    if (!engine) return;
+    engine->configure(fft_size, compensation, is_instrumental == JNI_TRUE);
+}
+
+JNIEXPORT void JNICALL
 Java_org_francasio_sing_audio_StftEngine_nativeForward(
         JNIEnv* env, jobject /*thiz*/, jlong handle, jfloatArray stereo_pcm, jfloatArray out_tensor, jint num_bins) {
     auto* engine = reinterpret_cast<sing::StftEngine*>(handle);

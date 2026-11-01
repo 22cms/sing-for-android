@@ -1,5 +1,6 @@
 package org.francasio.sing.provider
 
+import android.annotation.SuppressLint
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
@@ -312,6 +313,7 @@ object SingSettings {
                 putExtra("model_num_bins", modelInfo.numBins)
                 putExtra("model_num_frames", modelInfo.numFrames)
                 putExtra("model_fft_size", modelInfo.fftSize)
+                putExtra("model_compensation", modelInfo.compensation)
                 putExtra("model_hop_size", modelInfo.hopSize)
                 putExtra("model_chunk_samples", modelInfo.chunkSamples)
                 putExtra("model_crossfade_samples", modelInfo.crossfadeSamples)
@@ -501,7 +503,8 @@ object SingSettings {
             val isVr = netType.equals("vr_3band", ignoreCase = true) || netType.equals("vr", ignoreCase = true)
             val defaultNumFrames = if (isVr) 512 else 256
             val defaultNumBins = if (isVr) 769 else 2048
-            val defaultFftSize = if (isVr) 768 else 6144
+            val defaultFftSize = if (isVr) 768 else if (newModelId.contains("kim", ignoreCase = true)) 7680 else 6144
+            val defaultCompensation = if (newModelId.contains("kim", ignoreCase = true)) 1.02f else 1.035f
             val defaultHopSize = if (isVr) 512 else 1024
             val defaultChunkSamples = if (isVr) 261632 else 261120
             val defaultCrossfade = if (isVr) 0 else 44100
@@ -516,6 +519,7 @@ object SingSettings {
                 numBins = intent.getIntExtra("model_num_bins", defaultNumBins),
                 numFrames = intent.getIntExtra("model_num_frames", defaultNumFrames),
                 fftSize = intent.getIntExtra("model_fft_size", defaultFftSize),
+                compensation = intent.getFloatExtra("model_compensation", defaultCompensation),
                 hopSize = intent.getIntExtra("model_hop_size", defaultHopSize),
                 chunkSamples = intent.getIntExtra("model_chunk_samples", defaultChunkSamples),
                 crossfadeSamples = intent.getIntExtra("model_crossfade_samples", defaultCrossfade),
@@ -555,6 +559,7 @@ object SingSettings {
     }
 
     // Called by SingAudioProcessor (inside Apple Music process)
+    @SuppressLint("UnspecifiedRegisterReceiverFlag")
     fun initInAppleMusic(context: Context, managerInfo: String? = null, onChange: () -> Unit) {
         onChangeCallback = onChange
         // Send initial heartbeat

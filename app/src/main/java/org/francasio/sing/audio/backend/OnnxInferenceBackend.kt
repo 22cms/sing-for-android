@@ -1,5 +1,6 @@
 package org.francasio.sing.audio.backend
 
+import android.annotation.SuppressLint
 import ai.onnxruntime.OnnxJavaType
 import ai.onnxruntime.OnnxTensor
 import ai.onnxruntime.OrtEnvironment
@@ -14,6 +15,7 @@ import java.nio.ShortBuffer
 import org.francasio.sing.audio.StftEngine
 import org.francasio.sing.util.ModelLoader
 
+@SuppressLint("HalfFloat")
 class OnnxInferenceBackend(
     val env: OrtEnvironment,
     val session: OrtSession,

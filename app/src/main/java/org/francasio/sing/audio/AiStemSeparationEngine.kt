@@ -35,6 +35,14 @@ class AiStemSeparationEngine(
     private val stftEngine = StftEngine()
     private val vrDspEngine = VrDspEngine()
 
+    init {
+        stftEngine.configure(
+            initialBackend.modelInfo.fftSize,
+            initialBackend.modelInfo.compensation,
+            initialBackend.modelInfo.isInstrumental
+        )
+    }
+
     // Circular ring buffers (stereo interleaved: 2 floats per frame)
     private val inRing = FloatArray(RING_SIZE * 2)
     @Volatile private var inWriteFrames = 0L
@@ -158,6 +166,11 @@ class AiStemSeparationEngine(
     fun updateBackend(newBackend: InferenceBackend) {
         lock.withLock {
             currentBackend = newBackend
+            stftEngine.configure(
+                newBackend.modelInfo.fftSize,
+                newBackend.modelInfo.compensation,
+                newBackend.modelInfo.isInstrumental
+            )
             seekGeneration.incrementAndGet()
             inWriteFrames = 0L
             inProcessedFrames = 0L

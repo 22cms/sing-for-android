@@ -88,6 +88,11 @@ class StftEngine : AutoCloseable {
 
     private var nativeHandle: Long = nativeInit()
 
+    fun configure(fftSize: Int, compensation: Float = 1.035f, isInstrumental: Boolean = false) {
+        check(nativeHandle != 0L) { "StftEngine is closed" }
+        nativeConfigure(nativeHandle, fftSize, compensation, isInstrumental)
+    }
+
     fun forward(stereoPcm: FloatArray, outTensor: FloatArray, numBins: Int = N_BINS) {
         check(nativeHandle != 0L) { "StftEngine is closed" }
         require(stereoPcm.size >= TOTAL_SAMPLES * 2)
@@ -123,6 +128,7 @@ class StftEngine : AutoCloseable {
 
     private external fun nativeInit(): Long
     private external fun nativeDestroy(handle: Long)
+    private external fun nativeConfigure(handle: Long, fftSize: Int, compensation: Float, isInstrumental: Boolean)
     private external fun nativeForward(handle: Long, stereoPcm: FloatArray, outTensor: FloatArray, numBins: Int)
     private external fun nativeInverse(handle: Long, inTensor: FloatArray, outStereoPcm: FloatArray, numBins: Int)
     private external fun nativeCenterCutTensor(handle: Long, tensor: FloatArray, numBins: Int)
