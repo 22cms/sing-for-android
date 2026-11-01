@@ -18,6 +18,7 @@
     <string name="whats_new_title_5" translatable="false">Update Highlights and Automatic Checking</string>
     <string name="whats_new_desc_5" translatable="false">Sing for Android now looks for updates automatically and shows you what’s has changed in a pop-up view.</string>
     <string name="whats_new_minor_changes">Show minor changes</string>
+    <string name="minor_changes" translatable="false" formatted="false">• Improved audio separation quality and reduced high-frequency bleed for VR-Arch models (Kim Inst / Vocal)\n• Fixed crashes caused by invalid slider positions\n• Updated and refined strings\n• Automatic model catalog cache refresh on update\n• Fixed lyrics blur on tracks with immediate vocals</string>
     <string name="whats_new_close">Close</string>
     <string name="update_available_heading">New Update Available</string>
     <string name="update_available_version" translatable="false">v%1$s ➔ v%2$s</string>

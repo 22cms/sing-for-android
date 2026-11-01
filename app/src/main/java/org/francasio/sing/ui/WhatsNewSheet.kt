@@ -1,7 +1,5 @@
 package org.francasio.sing.ui
 
-import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -16,8 +14,6 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -25,7 +21,6 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -35,7 +30,6 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
@@ -52,6 +46,7 @@ import org.francasio.sing.ui.theme.SurfaceDark
 import org.francasio.sing.ui.theme.SurfaceContainerHigh
 import org.francasio.sing.ui.theme.TextPrimary
 import org.francasio.sing.ui.theme.TextSecondary
+import org.francasio.sing.provider.IS_MINOR_UPDATE
 import org.francasio.sing.util.XposedStatus
 import org.francasio.sing.update.UpdateInfo
 
@@ -64,9 +59,6 @@ private val releaseFeatures = listOf(
     WhatsNewFeature(R.drawable.ic_preserve_sides, R.string.whats_new_title_4, R.string.whats_new_desc_4),
     WhatsNewFeature(R.drawable.ic_update_notice, R.string.whats_new_title_5, R.string.whats_new_desc_5)
 )
-
-// Add minor change string IDs here in later releases; omit the disclosure when empty.
-private val minorChanges: List<Int> = emptyList()
 
 sealed interface ReleaseSheetMode {
     data object WhatsNew : ReleaseSheetMode
@@ -85,7 +77,6 @@ fun ReleaseHighlightsSheet(
     val context = LocalContext.current
     val appVersion = remember(context) { XposedStatus.getAppVersion(context) }
     val buttonTextColor = if (LocalIsMaterialYou.current) Accent2_900 else TextPrimary
-    var showMinorChanges by remember { mutableStateOf(false) }
     var isConfirming by remember { mutableStateOf(false) }
     val coroutineScope = rememberCoroutineScope()
     val update = (mode as? ReleaseSheetMode.UpdateAvailable)?.update
@@ -155,29 +146,15 @@ fun ReleaseHighlightsSheet(
                         fontSize = 15.sp,
                         lineHeight = 22.sp
                     )
+                } else if (IS_MINOR_UPDATE) {
+                    Text(
+                        text = stringResource(R.string.minor_changes),
+                        color = TextSecondary,
+                        fontSize = 15.sp,
+                        lineHeight = 22.sp
+                    )
                 } else {
                     releaseFeatures.forEach { feature -> FeatureRow(feature) }
-                }
-
-                if (update == null && minorChanges.isNotEmpty()) {
-                    Column(modifier = Modifier.animateContentSize()) {
-                        TextButton(onClick = { showMinorChanges = !showMinorChanges }) {
-                            Text(stringResource(R.string.whats_new_minor_changes), color = Primary)
-                            Icon(
-                                Icons.Default.KeyboardArrowDown,
-                                contentDescription = null,
-                                tint = Primary,
-                                modifier = Modifier.rotate(if (showMinorChanges) 180f else 0f)
-                            )
-                        }
-                        AnimatedVisibility(visible = showMinorChanges) {
-                            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                                minorChanges.forEach { change ->
-                                    Text(stringResource(change), color = TextSecondary, fontSize = 14.sp)
-                                }
-                            }
-                        }
-                    }
                 }
                 Spacer(modifier = Modifier.height(8.dp))
             }
