@@ -7,6 +7,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import org.francasio.sing.R
+import org.francasio.sing.ui.components.CollapsingTopBarDefaults
 import org.francasio.sing.ui.components.ExpressiveCollapsingTopBar
 import org.francasio.sing.ui.components.NavigationIcon
 import org.francasio.sing.ui.components.TopBarActionButton
@@ -23,6 +24,7 @@ fun BoxScope.MainTopBar(
         progress = progress,
         title = stringResource(id = R.string.app_name),
         subtitle = apkVersion,
+        maxContentWidth = CollapsingTopBarDefaults.DefaultMaxContentWidth,
         navigationIcon = if (openedFromMusic) {
             NavigationIcon.Morphing(
                 icon = painterResource(id = R.drawable.ic_sing),

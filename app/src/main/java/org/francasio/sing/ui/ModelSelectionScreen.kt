@@ -4,6 +4,7 @@ import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -39,8 +40,11 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.layout.LayoutCoordinates
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInParent
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.painterResource
@@ -104,6 +108,20 @@ fun ModelSelectionScreen(
     val scrollState = rememberScrollState()
     val density = LocalDensity.current
 
+    val configuration = LocalConfiguration.current
+    val screenWidth = configuration.screenWidthDp.dp
+    val minColumnWidth = 340.dp
+    val columnSpacing = 14.dp
+    val horizontalPadding = 32.dp
+
+    val numColumns = remember(screenWidth) {
+        val availableWidth = screenWidth - horizontalPadding
+        val count = ((availableWidth + columnSpacing) / (minColumnWidth + columnSpacing)).toInt()
+        maxOf(1, count)
+    }
+
+    var scrollContainerCoordinates by remember { mutableStateOf<LayoutCoordinates?>(null) }
+
     val statusBarTop = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
     val totalPinnedHeight = CollapsingTopBarDefaults.PinnedTopBarHeight + statusBarTop
     val progress = rememberCollapsingProgress(scrollState)
@@ -130,6 +148,14 @@ fun ModelSelectionScreen(
                 matchesStem && matchesBacking && matchesFamily
             }
         }
+    }
+
+    val columns = remember(visibleModelDefinitions, numColumns) {
+        val cols = List(numColumns) { mutableListOf<ModelLoader.ModelDefinition>() }
+        visibleModelDefinitions.forEachIndexed { index, modelDef ->
+            cols[index % numColumns].add(modelDef)
+        }
+        cols
     }
 
     var isRenderReady by remember { mutableStateOf(false) }
@@ -166,6 +192,7 @@ fun ModelSelectionScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .verticalScroll(scrollState)
+                .onGloballyPositioned { scrollContainerCoordinates = it }
         ) {
             // Space to clear the large expanded header with comfortable breathing room
             Spacer(modifier = Modifier.height(statusBarTop + 196.dp))
@@ -220,29 +247,49 @@ fun ModelSelectionScreen(
                         }
                     }
                     Spacer(modifier = Modifier.height(14.dp))
-                }
-
-                // Split by Models First: Render a separate Card for each Model Definition
-                visibleModelDefinitions.forEach { modelDef ->
-                    val isSelectedGroup = modelDef.versions.any { it.id == selectedModelId } || modelDef.id == selectedModelId
-                    Box(
+                } else {
+                    // Dynamic multi-column staggered layout (1, 2, 3... columns with no arbitrary limit)
+                    Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(horizontal = 16.dp)
-                            .onGloballyPositioned { coordinates ->
-                                val y = coordinates.positionInParent().y.toInt()
-                                cardPositions[modelDef.id] = y
-                            }
+                            .padding(horizontal = 16.dp),
+                        horizontalArrangement = Arrangement.spacedBy(14.dp),
+                        verticalAlignment = Alignment.Top
                     ) {
-                        ModelGroupCard(
-                            modelDef = modelDef,
-                            selectedModelId = selectedModelId,
-                            highlightPulse = if (isSelectedGroup) highlightPulse.value else 0f,
-                            selectedStemFilter = selectedStemFilter,
-                            backingRetentionOnly = backingRetentionOnly,
-                            selectedFamilyFilter = selectedFamilyFilter,
-                            onVersionSelect = onModelSelect
-                        )
+                        columns.forEach { columnModels ->
+                            Column(
+                                modifier = Modifier.weight(1f),
+                                verticalArrangement = Arrangement.spacedBy(14.dp)
+                            ) {
+                                columnModels.forEach { modelDef ->
+                                    val isSelectedGroup = modelDef.versions.any { it.id == selectedModelId } || modelDef.id == selectedModelId
+                                    Box(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .onGloballyPositioned { coordinates ->
+                                                scrollContainerCoordinates?.let { container ->
+                                                    if (container.isAttached && coordinates.isAttached) {
+                                                        val y = container.localPositionOf(coordinates, Offset.Zero).y.toInt()
+                                                        cardPositions[modelDef.id] = y
+                                                    }
+                                                } ?: run {
+                                                    cardPositions[modelDef.id] = coordinates.positionInParent().y.toInt()
+                                                }
+                                            }
+                                    ) {
+                                        ModelGroupCard(
+                                            modelDef = modelDef,
+                                            selectedModelId = selectedModelId,
+                                            highlightPulse = if (isSelectedGroup) highlightPulse.value else 0f,
+                                            selectedStemFilter = selectedStemFilter,
+                                            backingRetentionOnly = backingRetentionOnly,
+                                            selectedFamilyFilter = selectedFamilyFilter,
+                                            onVersionSelect = onModelSelect
+                                        )
+                                    }
+                                }
+                            }
+                        }
                     }
                     Spacer(modifier = Modifier.height(14.dp))
                 }

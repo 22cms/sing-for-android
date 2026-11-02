@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBars
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -137,10 +138,16 @@ fun InfoScreen(
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .verticalScroll(scrollState)
-                .padding(horizontal = 16.dp)
+                .verticalScroll(scrollState),
+            horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            Spacer(modifier = Modifier.height(statusBarTop + 140.dp))
+            Column(
+                modifier = Modifier
+                    .widthIn(max = 680.dp)
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp)
+            ) {
+                Spacer(modifier = Modifier.height(statusBarTop + 140.dp))
 
             // 1. App Identity
             Column(
@@ -302,11 +309,13 @@ fun InfoScreen(
             Spacer(modifier = Modifier.height(24.dp))
             Spacer(modifier = Modifier.navigationBarsPadding())
         }
+    }
 
         // Top Bar
         ExpressiveCollapsingTopBar(
             progress = progress,
             title = stringResource(id = R.string.title_info),
+            maxContentWidth = CollapsingTopBarDefaults.DefaultMaxContentWidth,
             navigationIcon = NavigationIcon.Morphing(
                 icon = rememberVectorPainter(Icons.Outlined.Info),
                 onBack = onBack

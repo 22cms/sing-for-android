@@ -7,16 +7,19 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBars
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.tooling.preview.Preview
@@ -121,91 +124,98 @@ fun MainScreen(
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .verticalScroll(scrollState)
-                .padding(horizontal = 16.dp)
+                .verticalScroll(scrollState),
+            horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            // Spacing to clear the huge expanded title header
-            Spacer(modifier = Modifier.height(statusBarTop + 196.dp))
+            Column(
+                modifier = Modifier
+                    .widthIn(max = 680.dp)
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp)
+            ) {
+                // Spacing to clear the huge expanded title header
+                Spacer(modifier = Modifier.height(statusBarTop + 196.dp))
 
-            // 1. Status Card
-            StatusCard(
-                isModuleLoaded = isModuleLoaded,
-                isModuleVersionMismatch = isModuleVersionMismatch,
-                appVersion = appVersion,
-                moduleVersion = moduleVersion,
-                xposedManagerInfo = xposedManagerInfo,
-                selectedModelId = selectedModelId,
-                currentModel = currentModel,
-                threadCount = threadCount,
-                onNavigateToModelSelection = onNavigateToModelSelection
-            )
+                // 1. Status Card
+                StatusCard(
+                    isModuleLoaded = isModuleLoaded,
+                    isModuleVersionMismatch = isModuleVersionMismatch,
+                    appVersion = appVersion,
+                    moduleVersion = moduleVersion,
+                    xposedManagerInfo = xposedManagerInfo,
+                    selectedModelId = selectedModelId,
+                    currentModel = currentModel,
+                    threadCount = threadCount,
+                    onNavigateToModelSelection = onNavigateToModelSelection
+                )
 
-            // 2. Action Buttons Row
-            QuickActionsRow(
-                isBenchmarkEnabled = isBenchmarkEnabled,
-                onNavigateToModelSelection = onNavigateToModelSelection,
-                onRunBenchmark = {
-                    onRunBenchmark()
-                    coroutineScope.launch {
-                        scrollState.animateScrollTo(scrollState.maxValue)
+                // 2. Action Buttons Row
+                QuickActionsRow(
+                    isBenchmarkEnabled = isBenchmarkEnabled,
+                    onNavigateToModelSelection = onNavigateToModelSelection,
+                    onRunBenchmark = {
+                        onRunBenchmark()
+                        coroutineScope.launch {
+                            scrollState.animateScrollTo(scrollState.maxValue)
+                        }
                     }
-                }
-            )
+                )
 
-            // 3. Sing Settings Section
-            SingSettingsCard(
-                preserveSide = preserveSide,
-                canPreserveSide = canPreserveSide,
-                twoWaySlider = twoWaySlider,
-                allowZeroFloor = allowZeroFloor,
-                forceSongEligibility = forceSongEligibility,
-                onPreserveSideChange = onPreserveSideChange,
-                onTwoWaySliderChange = onTwoWaySliderChange,
-                onAllowZeroFloorChange = onAllowZeroFloorChange,
-                onForceSongEligibilityChange = onForceSongEligibilityChange
-            )
+                // 3. Sing Settings Section
+                SingSettingsCard(
+                    preserveSide = preserveSide,
+                    canPreserveSide = canPreserveSide,
+                    twoWaySlider = twoWaySlider,
+                    allowZeroFloor = allowZeroFloor,
+                    forceSongEligibility = forceSongEligibility,
+                    onPreserveSideChange = onPreserveSideChange,
+                    onTwoWaySliderChange = onTwoWaySliderChange,
+                    onAllowZeroFloorChange = onAllowZeroFloorChange,
+                    onForceSongEligibilityChange = onForceSongEligibilityChange
+                )
 
-            Spacer(modifier = Modifier.height(16.dp))
+                Spacer(modifier = Modifier.height(16.dp))
 
-            // 3b. Lyrics Section
-            LyricsSettingsCard(
-                blurUnfocusedLyrics = blurUnfocusedLyrics,
-                centerGroupLyrics = centerGroupLyrics,
-                englishTranslationFallback = englishTranslationFallback,
-                onBlurUnfocusedLyricsChange = onBlurUnfocusedLyricsChange,
-                onCenterGroupLyricsChange = onCenterGroupLyricsChange,
-                onEnglishTranslationFallbackChange = onEnglishTranslationFallbackChange
-            )
+                // 3b. Lyrics Section
+                LyricsSettingsCard(
+                    blurUnfocusedLyrics = blurUnfocusedLyrics,
+                    centerGroupLyrics = centerGroupLyrics,
+                    englishTranslationFallback = englishTranslationFallback,
+                    onBlurUnfocusedLyricsChange = onBlurUnfocusedLyricsChange,
+                    onCenterGroupLyricsChange = onCenterGroupLyricsChange,
+                    onEnglishTranslationFallbackChange = onEnglishTranslationFallbackChange
+                )
 
-            Spacer(modifier = Modifier.height(16.dp))
+                Spacer(modifier = Modifier.height(16.dp))
 
-            // 4. Performance & Hardware Section
-            PerformanceSettingsCard(
-                ecoMode = ecoMode,
-                hardwareTarget = hardwareTarget,
-                isOnnxModel = isOnnxModel,
-                isViNNetModel = isViNNetModel,
-                threadCount = threadCount,
-                onEcoModeChange = onEcoModeChange,
-                onHardwareTargetChange = onHardwareTargetChange,
-                onThreadCountChange = onThreadCountChange
-            )
+                // 4. Performance & Hardware Section
+                PerformanceSettingsCard(
+                    ecoMode = ecoMode,
+                    hardwareTarget = hardwareTarget,
+                    isOnnxModel = isOnnxModel,
+                    isViNNetModel = isViNNetModel,
+                    threadCount = threadCount,
+                    onEcoModeChange = onEcoModeChange,
+                    onHardwareTargetChange = onHardwareTargetChange,
+                    onThreadCountChange = onThreadCountChange
+                )
 
-            Spacer(modifier = Modifier.height(16.dp))
+                Spacer(modifier = Modifier.height(16.dp))
 
-            // 5. Processing & Pipeline Details
-            PipelineDetailsCard(
-                benchmarkState = benchmarkState,
-                isBenchmarkEnabled = isBenchmarkEnabled,
-                isOnnxModel = isOnnxModel,
-                currentModel = currentModel,
-                hardwareTarget = hardwareTarget,
-                activeProvider = activeProvider,
-                onRunBenchmark = onRunBenchmark
-            )
+                // 5. Processing & Pipeline Details
+                PipelineDetailsCard(
+                    benchmarkState = benchmarkState,
+                    isBenchmarkEnabled = isBenchmarkEnabled,
+                    isOnnxModel = isOnnxModel,
+                    currentModel = currentModel,
+                    hardwareTarget = hardwareTarget,
+                    activeProvider = activeProvider,
+                    onRunBenchmark = onRunBenchmark
+                )
 
-            Spacer(modifier = Modifier.height(24.dp))
-            Spacer(modifier = Modifier.navigationBarsPadding())
+                Spacer(modifier = Modifier.height(24.dp))
+                Spacer(modifier = Modifier.navigationBarsPadding())
+            }
         }
 
         // Pinned Top Bar & Animated Header

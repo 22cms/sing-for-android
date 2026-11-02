@@ -27,7 +27,9 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -40,6 +42,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.painter.Painter
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
@@ -62,12 +65,15 @@ sealed interface NavigationIcon {
     data object None : NavigationIcon
 }
 
+val LocalTopBarContentMargin = compositionLocalOf { 0.dp }
+
 object CollapsingTopBarDefaults {
     val PinnedTopBarHeight: Dp = 64.dp
     val CollapseRangeDefault: Dp = 110.dp
     val CollapseRangeCompact: Dp = 100.dp
     val ContentPaddingExpanded: Dp = 196.dp
     val ContentPaddingCompact: Dp = 140.dp
+    val DefaultMaxContentWidth: Dp = 680.dp
 }
 
 @Composable
@@ -90,9 +96,17 @@ fun BoxScope.ExpressiveCollapsingTopBar(
     subtitle: String? = null,
     navigationIcon: NavigationIcon = NavigationIcon.None,
     pinnedTopBarHeight: Dp = CollapsingTopBarDefaults.PinnedTopBarHeight,
+    maxContentWidth: Dp? = null,
     trailingAction: (@Composable BoxScope.(progress: Float) -> Unit)? = null
 ) {
     val context = LocalContext.current
+    val configuration = LocalConfiguration.current
+    val screenWidth = configuration.screenWidthDp.dp
+    val contentMargin = if (maxContentWidth != null && screenWidth > maxContentWidth) {
+        (screenWidth - maxContentWidth) / 2
+    } else {
+        0.dp
+    }
     val statusBarTop = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
     val totalPinnedHeight = pinnedTopBarHeight + statusBarTop
 
@@ -154,7 +168,7 @@ fun BoxScope.ExpressiveCollapsingTopBar(
     val endFontSize = 20f
     val titleFontSize = (startFontSize - (startFontSize - endFontSize) * progress).sp
 
-    val titleStartX = 20.dp
+    val titleStartX = contentMargin + 20.dp
     val titleEndX = if (hasBackButton) 68.dp else 20.dp
     val currentTitleX = titleStartX + (titleEndX - titleStartX) * progress
 
@@ -208,7 +222,9 @@ fun BoxScope.ExpressiveCollapsingTopBar(
             }
 
             val circleSize = 52.dp - (12.dp * progress)
-            val circleX = 20.dp - (4.dp * progress)
+            val circleStartX = contentMargin + 20.dp
+            val circleEndX = 16.dp
+            val circleX = circleStartX + (circleEndX - circleStartX) * progress
             val circleStartY = statusBarTop + 24.dp
             val circleEndY = statusBarTop + (pinnedTopBarHeight - 40.dp) / 2
             val circleY = circleStartY + (circleEndY - circleStartY) * progress
@@ -271,7 +287,9 @@ fun BoxScope.ExpressiveCollapsingTopBar(
         }
         is NavigationIcon.Back -> {
             val circleSize = 52.dp - (12.dp * progress)
-            val circleX = 20.dp - (4.dp * progress)
+            val circleStartX = contentMargin + 20.dp
+            val circleEndX = 16.dp
+            val circleX = circleStartX + (circleEndX - circleStartX) * progress
             val circleStartY = statusBarTop + 24.dp
             val circleEndY = statusBarTop + (pinnedTopBarHeight - 40.dp) / 2
             val circleY = circleStartY + (circleEndY - circleStartY) * progress
@@ -352,7 +370,9 @@ fun BoxScope.ExpressiveCollapsingTopBar(
     )
 
     // 5. Trailing Action Slot (e.g. pinned Info button)
-    trailingAction?.invoke(this, progress)
+    CompositionLocalProvider(LocalTopBarContentMargin provides contentMargin) {
+        trailingAction?.invoke(this, progress)
+    }
 }
 
 @Composable
@@ -365,12 +385,18 @@ fun BoxScope.TopBarActionButton(
     pinnedTopBarHeight: Dp = CollapsingTopBarDefaults.PinnedTopBarHeight
 ) {
     val statusBarTop = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
+    val contentMargin = LocalTopBarContentMargin.current
+    val currentRightOffset = -(16.dp + contentMargin * (1f - progress))
+    val actionStartY = statusBarTop + 30.dp
+    val actionEndY = statusBarTop + (pinnedTopBarHeight - 40.dp) / 2
+    val currentY = actionStartY + (actionEndY - actionStartY) * progress
+
     Box(
         modifier = modifier
             .align(Alignment.TopEnd)
             .offset(
-                x = (-16).dp,
-                y = statusBarTop + (pinnedTopBarHeight - 40.dp) / 2
+                x = currentRightOffset,
+                y = currentY
             )
             .size(40.dp)
             .clip(CircleShape)
