@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBars
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
@@ -24,6 +25,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ExitToApp
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -202,18 +204,26 @@ fun InfoScreen(
 
                 Spacer(modifier = Modifier.height(10.dp))
 
-                Box(
+                Row(
                     modifier = Modifier
                         .clip(RoundedCornerShape(8.dp))
                         .background(SurfaceContainerHigh)
                         .clickable(onClick = onVersionClick)
-                        .padding(horizontal = 10.dp, vertical = 4.dp)
+                        .padding(start = 10.dp, end = 6.dp, top = 4.dp, bottom = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text(
                         text = appVersion,
                         color = TextSecondary,
                         fontSize = 12.sp,
                         fontWeight = FontWeight.SemiBold
+                    )
+                    Spacer(modifier = Modifier.width(3.dp))
+                    Icon(
+                        imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                        contentDescription = null,
+                        tint = TextSecondary,
+                        modifier = Modifier.size(15.dp)
                     )
                 }
             }
