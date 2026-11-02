@@ -165,6 +165,9 @@ class AiStemSeparationEngine(
 
     fun updateBackend(newBackend: InferenceBackend) {
         lock.withLock {
+            // Settings/heartbeat refreshes can return the cached instance.
+            // Flushing it would drop the entire decoded-ahead audio cushion.
+            if (currentBackend === newBackend) return
             currentBackend = newBackend
             stftEngine.configure(
                 newBackend.modelInfo.fftSize,

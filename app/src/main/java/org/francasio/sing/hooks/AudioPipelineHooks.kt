@@ -199,18 +199,14 @@ class AudioPipelineHooks(
                                 val audioProcessorClass = ReflectionUtils.findClass("com.google.android.exoplayer2.audio.AudioProcessor", cl)
                                 if (audioProcessorClass != null) {
                                     @Suppress("UNCHECKED_CAST")
-                                    val newToFloat = if (floatResampler != null) {
-                                        val arr = java.lang.reflect.Array.newInstance(audioProcessorClass, 2) as Array<Any>
-                                        arr[0] = floatResampler
-                                        arr[1] = vocalsProcessor
-                                        arr
-                                    } else {
-                                        val arr = java.lang.reflect.Array.newInstance(audioProcessorClass, 1) as Array<Any>
-                                        arr[0] = vocalsProcessor
-                                        arr
-                                    }
+                                    // ExoPlayer's packed high-resolution integer encoding IDs
+                                    // are not Android AudioTrack encoding IDs. Retain its
+                                    // converter until the sink itself supports integer output.
+                                    val newToFloat = java.lang.reflect.Array.newInstance(audioProcessorClass, if (floatResampler != null) 2 else 1) as Array<Any>
+                                    if (floatResampler != null) newToFloat[0] = floatResampler
+                                    newToFloat[newToFloat.lastIndex] = vocalsProcessor
                                     ReflectionUtils.setObjectField(sinkObj, "toFloatPcmAvailableAudioProcessors", newToFloat)
-                                    logInfo("Successfully patched DefaultAudioSink.toFloatPcmAvailableAudioProcessors with [FloatResampler, VocalsAudioProcessor]")
+                                    logInfo("Patched float PCM chain with format-preserving VocalsAudioProcessor")
                                 }
                             }
                         } catch (t: Throwable) {
@@ -232,6 +228,21 @@ class AudioPipelineHooks(
         if (processorClass == null) {
             logInfo("Could not find VocalsAudioProcessor")
             return
+        }
+
+        val formatClass = ReflectionUtils.findClass(
+            "com.google.android.exoplayer2.audio.AudioProcessor\$AudioFormat", cl
+        )
+        if (formatClass != null) {
+            ReflectionUtils.findMethod(processorClass, "onConfigure", formatClass)?.let { method ->
+                hookMethod(method) { chain ->
+                    // Retain the host's state initialization, but never advertise float
+                    // output for integer input. The format stays stable across toggles.
+                    chain.proceed()
+                    logInfo("VocalsAudioProcessor preserving PCM format: ${chain.getArg(0)}")
+                    chain.getArg(0)
+                }
+            }
         }
 
         try {

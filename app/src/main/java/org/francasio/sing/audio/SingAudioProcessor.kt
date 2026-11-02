@@ -47,20 +47,7 @@ class SingAudioProcessor(
             if (!inputBuffer.hasRemaining()) return
 
             try {
-                val inputFormat = ReflectionUtils.getObjectField(processorObj, "inputAudioFormat")
-                val encoding = ReflectionUtils.getIntField(inputFormat, "encoding")
-                val channelCount = ReflectionUtils.getIntField(inputFormat, "channelCount")
-                val bytesPerSample = getBytesPerSample(encoding)
-
-                val remainingBytes = inputBuffer.remaining()
-                val frameCount = remainingBytes / (channelCount * bytesPerSample)
-                if (frameCount <= 0) {
-                    inputBuffer.position(inputBuffer.limit())
-                    return
-                }
-
-                val totalSamples = frameCount * channelCount
-                val outputBytes = totalSamples * 4 // Output is always 32-bit Float PCM
+                val outputBytes = inputBuffer.remaining()
                 val outputBuf = ReflectionUtils.callMethod(
                     processorObj,
                     "replaceOutputBuffer",
@@ -68,47 +55,7 @@ class SingAudioProcessor(
                 ) as ByteBuffer
 
                 outputBuf.clear()
-                outputBuf.order(ByteOrder.LITTLE_ENDIAN)
-                val outFloatBuf = outputBuf.asFloatBuffer()
-
-                inputBuffer.order(ByteOrder.LITTLE_ENDIAN)
-                when (encoding) {
-                    ENCODING_PCM_16BIT -> {
-                        val shortBuf = inputBuffer.asShortBuffer()
-                        val factor = 1.0f / 32768.0f
-                        for (i in 0 until totalSamples) {
-                            outFloatBuf.put(shortBuf.get() * factor)
-                        }
-                    }
-                    ENCODING_PCM_FLOAT -> {
-                        outFloatBuf.put(inputBuffer.asFloatBuffer())
-                    }
-                    ENCODING_PCM_24BIT -> {
-                        val startPos = inputBuffer.position()
-                        val factor = 1.0f / 8388608.0f
-                        for (i in 0 until totalSamples) {
-                            val b0 = inputBuffer.get(startPos + i * 3).toInt() and 0xFF
-                            val b1 = inputBuffer.get(startPos + i * 3 + 1).toInt() and 0xFF
-                            val b2 = inputBuffer.get(startPos + i * 3 + 2).toInt() // signed high byte
-                            val sampleInt = (b2 shl 16) or (b1 shl 8) or b0
-                            outFloatBuf.put(sampleInt * factor)
-                        }
-                    }
-                    ENCODING_PCM_32BIT -> {
-                        val intBuf = inputBuffer.asIntBuffer()
-                        val factor = 1.0f / 2147483648.0f
-                        for (i in 0 until totalSamples) {
-                            outFloatBuf.put(intBuf.get() * factor)
-                        }
-                    }
-                    else -> {
-                        val shortBuf = inputBuffer.asShortBuffer()
-                        val factor = 1.0f / 32768.0f
-                        for (i in 0 until totalSamples) {
-                            outFloatBuf.put(shortBuf.get() * factor)
-                        }
-                    }
-                }
+                PcmOutput.copy(inputBuffer, outputBuf)
 
                 inputBuffer.position(inputBuffer.limit())
                 outputBuf.position(outputBytes)
@@ -203,7 +150,11 @@ class SingAudioProcessor(
                 val currentThreads = ModelLoader.threadCount
                 val currentTarget = ModelLoader.currentTarget
                 val currentModel = ModelLoader.currentModelId
-                if (SingSettings.threadCount != currentThreads || SingSettings.hardwareTarget != currentTarget || selectedModel != currentModel) {
+                // Match ModelLoader's cache policy: NPU requests reuse the
+                // backend regardless of thread count (including CPU fallback).
+                val threadsChanged = SingSettings.hardwareTarget != SingSettings.TARGET_NPU &&
+                    SingSettings.threadCount != currentThreads
+                if (threadsChanged || SingSettings.hardwareTarget != currentTarget || selectedModel != currentModel) {
                     isEngineReady = false
                     bgExecutor.execute {
                         try {
@@ -313,7 +264,7 @@ class SingAudioProcessor(
             val singActive = isEnabled
             val engine = aiEngine
 
-            // If Sing is OFF or AI engine uninitialized: direct pass-through with 0% CPU and 0 latency
+            // If Sing is OFF or AI engine uninitialized: byte-for-byte PCM bypass.
             if (!singActive || engine == null || !isEngineReady) {
                 if (engine?.active == true) {
                     engine.deactivate()
@@ -465,7 +416,7 @@ class SingAudioProcessor(
                     outputFrames = upResampler!!.resample(resampledOutFloats, popped44k, outFloats)
                 }
 
-                val outputBytes = outputFrames * channelCount * 4
+                val outputBytes = outputFrames * channelCount * bytesPerSample
                 val outputBuf = ReflectionUtils.callMethod(
                     processorObj,
                     "replaceOutputBuffer",
@@ -475,13 +426,13 @@ class SingAudioProcessor(
                 outputBuf.clear()
                 outputBuf.order(ByteOrder.LITTLE_ENDIAN)
                 if (outputBytes > 0) {
-                    outputBuf.asFloatBuffer().put(outFloats, 0, outputFrames * channelCount)
+                    PcmOutput.write(outputBuf, outFloats, outputFrames * channelCount, encoding)
                 }
                 outputBuf.position(outputBytes)
                 outputBuf.flip()
             } else {
                 // Fallback pass-through for mono tracks
-                val outputBytes = totalSamples * 4
+                val outputBytes = totalSamples * bytesPerSample
                 val outputBuf = ReflectionUtils.callMethod(
                     processorObj,
                     "replaceOutputBuffer",
@@ -490,7 +441,7 @@ class SingAudioProcessor(
 
                 outputBuf.clear()
                 outputBuf.order(ByteOrder.LITTLE_ENDIAN)
-                outputBuf.asFloatBuffer().put(inFloats, 0, totalSamples)
+                PcmOutput.write(outputBuf, inFloats, totalSamples, encoding)
                 outputBuf.position(outputBytes)
                 outputBuf.flip()
             }
@@ -571,6 +522,7 @@ class SingAudioProcessor(
         }
         val channelCount = ReflectionUtils.getIntField(inputFormat, "channelCount")
         val sampleRate = ReflectionUtils.getIntField(inputFormat, "sampleRate")
+        val encoding = ReflectionUtils.getIntField(inputFormat, "encoding")
 
         if (channelCount < 2) return null
         if (!engine.hasPendingOutput) return null
@@ -592,7 +544,7 @@ class SingAudioProcessor(
 
         if (outputFrames <= 0) return null
 
-        val outputBytes = outputFrames * channelCount * 4
+        val outputBytes = outputFrames * channelCount * getBytesPerSample(encoding)
         val outputBuf = ReflectionUtils.callMethod(
             processorObj,
             "replaceOutputBuffer",
@@ -601,7 +553,7 @@ class SingAudioProcessor(
 
         outputBuf.clear()
         outputBuf.order(ByteOrder.LITTLE_ENDIAN)
-        outputBuf.asFloatBuffer().put(outFloats, 0, outputFrames * channelCount)
+        PcmOutput.write(outputBuf, outFloats, outputFrames * channelCount, encoding)
         outputBuf.position(outputBytes)
         outputBuf.flip()
         return outputBuf
