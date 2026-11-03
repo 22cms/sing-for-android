@@ -9,10 +9,10 @@
     <string name="whats_new_version">Version %1$s</string>
     <string name="whats_new_title_1" translatable="false">Tablet &amp; Large-Screen Optimization</string>
     <string name="whats_new_desc_1" translatable="false">Sing for Android now uses your tablet\' screen real estate more wisely, instead of simply scaling the mobile UI.</string>
-    <string name="whats_new_title_2" translatable="false">Zero-Overhead Passthrough</string>
-    <string name="whats_new_desc_2" translatable="false">When Sing mode is turned off, audio now passes through directly in its native precision, preventing format conversion during playback and reducing CPU usage.</string>
+    <string name="whats_new_title_2" translatable="false">Conversion-free Passthrough</string>
+    <string name="whats_new_desc_2" translatable="false">When Sing mode is turned off, audio now passes through directly in its native precision, preventing format conversions during playback and reducing CPU usage.</string>
+    <string name="minor_changes" translatable="false" formatted="false">• Fixed a crash when switching neural models during active audio playback\n• Improved audio separation quality and reduced high-frequency bleed for VR-Arch and MDXNet models\n• Fixed crashes caused by invalid stored slider positions\n• Automatic model catalog cache refresh on app update\n• Attempted to fix lyrics blur on tracks with immediate vocals\n• Added XNNPACK support for ONNXRuntime (on non Qualcomm devices)\n• Updated and refined strings</string>
     <string name="whats_new_minor_changes">Minor changes</string>
-    <string name="minor_changes" translatable="false" formatted="false">• Fixed a crash when switching neural models during active audio playback\n• Added native buffer bounds checking across all inference backends and DSP engines\n• Improved audio separation quality and reduced high-frequency bleed for VR-Arch and MDXNet models\n• Fixed crashes caused by invalid slider positions\n• Automatic model catalog cache refresh on app update\n• Fixed lyrics blur on tracks with immediate vocals\n• Added navigation arrow to the Info screen version badge\n• Updated and refined strings</string>
     <string name="whats_new_close">Close</string>
     <string name="update_available_heading">New Update Available</string>
     <string name="update_available_version" translatable="false">v%1$s ➔ v%2$s</string>
