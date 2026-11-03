@@ -49,8 +49,8 @@ android {
         // Android 11 (API 30) minimum SDK to match Apple Music's minimum SDK version
         minSdk = 30
         targetSdk = 34
-        versionCode = 2
-        versionName = "1.1.1"
+        versionCode = 3
+        versionName = "1.2"
 
         ndk {
             abiFilters.addAll(listOf("armeabi-v7a", "arm64-v8a", "x86_64"))
