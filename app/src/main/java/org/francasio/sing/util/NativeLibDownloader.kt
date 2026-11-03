@@ -16,6 +16,17 @@ object NativeLibDownloader {
     private const val ONNX_RUNTIME_CPU_VERSION = "1.30.0"
     private const val QNN_RUNTIME_VERSION = "2.51.0"
     private const val MAVEN_BASE = "https://repo1.maven.org/maven2"
+    private const val ORT_CACHE_ID_FILE = "ort-runtime-id"
+
+    private fun runtimeVariant(): OnnxRuntimeVariant = OnnxRuntimeVariant.select(
+        android.os.Build.SUPPORTED_ABIS.firstOrNull() ?: "arm64-v8a",
+        DeviceHelper.isQualcommWithHexagonHtp
+    )
+
+    private fun runtimeCacheId(variant: OnnxRuntimeVariant): String = when (variant) {
+        OnnxRuntimeVariant.QNN -> "qnn-$ONNX_RUNTIME_VERSION"
+        OnnxRuntimeVariant.STANDARD -> "standard-$ONNX_RUNTIME_CPU_VERSION"
+    }
 
     private val ONNX_AAR_URL =
         "$MAVEN_BASE/com/microsoft/onnxruntime/onnxruntime-android-qnn/$ONNX_RUNTIME_VERSION/onnxruntime-android-qnn-$ONNX_RUNTIME_VERSION.aar"
@@ -45,6 +56,14 @@ object NativeLibDownloader {
         val ort = File(dir, "libonnxruntime.so")
         val jni = File(dir, "libonnxruntime4j_jni.so")
         if (!ort.exists() || !jni.exists()) return false
+        // ABI alone cannot distinguish the standard and QNN builds. Legacy
+        // unmarked caches are downloaded once more to establish their identity.
+        val cachedId = try {
+            File(dir, ORT_CACHE_ID_FILE).readText().trim()
+        } catch (_: Throwable) {
+            return false
+        }
+        if (cachedId != runtimeCacheId(runtimeVariant())) return false
         // Invalidate stale caches (e.g. arm64 libs left on an x86_64 device).
         val wantMachine = if ((android.os.Build.SUPPORTED_ABIS.firstOrNull() ?: "").startsWith("arm64")) 0x00B7 else 0x003E
         try {
@@ -143,7 +162,8 @@ object NativeLibDownloader {
         }
     }
 
-    private fun extractEntries(aarFile: File, destDir: File, wanted: Set<String>) {
+    private fun extractEntries(aarFile: File, destDir: File, wanted: Set<String>): Set<String> {
+        val extracted = mutableSetOf<String>()
         ZipFile(aarFile).use { zip ->
             val entries = zip.entries()
             while (entries.hasMoreElements()) {
@@ -162,8 +182,10 @@ object NativeLibDownloader {
                 outFile.setReadable(true, false)
                 outFile.setExecutable(true, false)
                 Log.i(TAG, "Extracted $name")
+                extracted.add(name)
             }
         }
+        return extracted
     }
 
     private fun safeGetString(context: Context, resId: Int, fallback: String): String {
@@ -177,8 +199,8 @@ object NativeLibDownloader {
     fun downloadOnnxRuntime(context: Context, onProgress: (String, Float) -> Unit): Boolean {
         currentLabel = safeGetString(context, R.string.downloading_onnx_runtime, "Downloading ONNX Runtime...")
         val dir = getLibsDir(context)
-        val abi = android.os.Build.SUPPORTED_ABIS.firstOrNull() ?: "arm64-v8a"
-        val (url, tmpName) = if (abi.startsWith("arm64")) {
+        val variant = runtimeVariant()
+        val (url, tmpName) = if (variant == OnnxRuntimeVariant.QNN) {
             ONNX_AAR_URL to "onnxruntime-android-qnn.aar.tmp"
         } else {
             ONNX_CPU_AAR_URL to "onnxruntime-android.aar.tmp"
@@ -195,8 +217,16 @@ object NativeLibDownloader {
         currentLabel = safeGetString(context, R.string.extracting_onnx_runtime, "Extracting ONNX Runtime...")
         currentProgress = 0.75f
         onProgress(currentLabel, currentProgress)
-        extractEntries(tmpAar, dir, setOf("libonnxruntime.so", "libonnxruntime4j_jni.so"))
+        val wanted = setOf("libonnxruntime.so", "libonnxruntime4j_jni.so")
+        File(dir, ORT_CACHE_ID_FILE).delete()
+        val extracted = extractEntries(tmpAar, dir, wanted)
         tmpAar.delete()
+        if (extracted != wanted || wanted.any { File(dir, it).length() == 0L }) {
+            Log.w(TAG, "ONNX Runtime archive did not contain all required native libraries")
+            currentLabel = ""
+            return false
+        }
+        File(dir, ORT_CACHE_ID_FILE).writeText(runtimeCacheId(variant))
         currentProgress = 1f
         onProgress(currentLabel, currentProgress)
         currentLabel = ""

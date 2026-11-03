@@ -376,6 +376,7 @@ Java_org_francasio_sing_audio_backend_MnnInferenceBackend_nativeRun(
     if (!h || !h->input || !h->output) return JNI_FALSE;
 
     jsize inLen = env->GetArrayLength(jin);
+    jsize outLen = env->GetArrayLength(jout);
     bool hasDynamic = false;
     for (int d : h->inDims) {
         if (d <= 0) { hasDynamic = true; break; }
@@ -397,6 +398,11 @@ Java_org_francasio_sing_audio_backend_MnnInferenceBackend_nativeRun(
 
     size_t inN = 1; for (int d : h->inDims) inN *= d;
     size_t outN = 1; for (int d : h->outDims) outN *= d;
+    if ((size_t)inLen < inN || (size_t)outLen < outN) {
+        MLOG("MNN nativeRun buffer size mismatch: inLen=%d (expected %zu), outLen=%d (expected %zu)",
+             (int)inLen, inN, (int)outLen, outN);
+        return JNI_FALSE;
+    }
     jfloat* src = env->GetFloatArrayElements(jin, nullptr);
     if (!src) return JNI_FALSE;
     halide_type_t ht; ht.code = halide_type_float; ht.bits = 32; ht.lanes = 1;

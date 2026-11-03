@@ -109,13 +109,15 @@ Java_org_francasio_sing_audio_backend_NativeInferenceBackend_nativeProcess(
     jint frameCount, jint blockSize) {
   (void)thiz;
   auto* h = (VinetHandle*)(intptr_t)handle;
-  if (h == nullptr) return;
+  if (h == nullptr || jin == nullptr || jout == nullptr) return;
 
   int bs = blockSize > 0 ? blockSize : 4096;
   if (bs > 4096) bs = 4096; // VinetHandle planar buffers are sized for 4096 frames
   int n = (int)frameCount;
   if (n > bs) n = bs;
   if (n < 0) n = 0;
+
+  if (env->GetArrayLength(jin) < 2 * n || env->GetArrayLength(jout) < 2 * n) return;
 
   // interleaved stereo input -> planar [L(bs), R(bs)]
   jfloat* src = env->GetFloatArrayElements(jin, nullptr);

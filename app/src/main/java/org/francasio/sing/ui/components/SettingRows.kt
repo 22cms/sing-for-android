@@ -331,6 +331,8 @@ fun SettingSliderRow(
     description: String,
     modifier: Modifier = Modifier
 ) {
+    val isMaterialYou = LocalIsMaterialYou.current
+
     Column(
         modifier = modifier
             .fillMaxWidth()
@@ -357,20 +359,13 @@ fun SettingSliderRow(
                 modifier = Modifier.weight(1f)
             )
 
-            Box(
-                modifier = Modifier
-                    .clip(RoundedCornerShape(8.dp))
-                    .background(Primary.copy(alpha = 0.16f))
-                    .padding(horizontal = 10.dp, vertical = 4.dp)
-            ) {
-                Text(
-                    text = stringResource(id = R.string.setting_thread_count_badge_format, value),
-                    color = Primary,
-                    fontSize = 12.5.sp,
-                    fontWeight = FontWeight.Bold,
-                    textAlign = TextAlign.End
-                )
-            }
+            Text(
+                text = stringResource(id = R.string.setting_thread_count_badge_format, value),
+                color = if (isMaterialYou) Primary else TextSecondary,
+                fontSize = 12.5.sp,
+                fontWeight = FontWeight.Bold,
+                textAlign = TextAlign.End
+            )
         }
 
         Spacer(modifier = Modifier.height(10.dp))

@@ -522,6 +522,7 @@ class AiStemSeparationEngine(
                 val blockSize = currentBackend.modelInfo.blockSize
                 val lookaheadSize = currentBackend.modelInfo.lookaheadSize
 
+                var localBackend: InferenceBackend? = null
                 var myGen = 0L
                 var startFrame = 0L
                 var isFlushingDelay = false
@@ -530,14 +531,17 @@ class AiStemSeparationEngine(
                     while (running && (!active || (
                         (inWriteFrames - inProcessedFrames) < blockSize && !endOfStreamSignaled
                     ))) {
+                        val genBefore = seekGeneration.get()
                         try {
                             workCond.await()
                         } catch (e: InterruptedException) {
                             return
                         }
+                        if (seekGeneration.get() != genBefore || !isTimeDomain) return@withLock
                     }
-                    if (!running || !active) return@withLock
+                    if (!running || !active || !isTimeDomain) return@withLock
 
+                    localBackend = currentBackend
                     myGen = seekGeneration.get()
                     startFrame = inProcessedFrames
                     val available = inWriteFrames - startFrame
@@ -565,18 +569,20 @@ class AiStemSeparationEngine(
                     }
                 }
 
-                if (!running || !active) continue
+                val backend = localBackend ?: continue
+                if (!running || !active || myGen != seekGeneration.get()) continue
 
                 try {
                     val nnT0 = System.nanoTime()
-                    currentBackend.runTimeDomain(timeDomainInPcm, timeDomainOutPcm, blockSize)
+                    if (myGen != seekGeneration.get()) continue
+                    backend.runTimeDomain(timeDomainInPcm, timeDomainOutPcm, blockSize)
                     val nnMs = (System.nanoTime() - nnT0) / 1_000_000
                     tmBlocks++
                     tmTotalMs += nnMs
                     if (nnMs < tmMinMs) tmMinMs = nnMs
                     if (nnMs > tmMaxMs) tmMaxMs = nnMs
                     if (tmBlocks % 100 == 0L) {
-                        Log.d(TAG, "Time-domain NN: $tmBlocks blocks, avg ${tmTotalMs / tmBlocks} ms, min $tmMinMs ms, max $tmMaxMs ms (budget 92.9 ms/block, ${currentBackend.providerName})")
+                        Log.d(TAG, "Time-domain NN: $tmBlocks blocks, avg ${tmTotalMs / tmBlocks} ms, min $tmMinMs ms, max $tmMaxMs ms (budget 92.9 ms/block, ${backend.providerName})")
                     }
 
                     val makeCenter = isPreserveSideActive
@@ -684,6 +690,7 @@ class AiStemSeparationEngine(
 
             } else if (isVr3Band) {
                 // VR 3-band architecture inference (12_SP-UVR-3B-44100, etc.)
+                var localBackend: InferenceBackend? = null
                 var myGen = 0L
                 var destFrame = 0L
                 val chunkSamples = vrDspEngine.chunkSamples
@@ -697,15 +704,18 @@ class AiStemSeparationEngine(
                     while (running && (!active || (
                         (inWriteFrames - inProcessedFrames) < minInputNeeded && !endOfStreamSignaled
                     ))) {
+                        val genBefore = seekGeneration.get()
                         try {
                             workCond.await()
                         } catch (e: InterruptedException) {
                             return
                         }
+                        if (seekGeneration.get() != genBefore || !isVr3Band) return@withLock
                     }
-                    if (!running || !active) return@withLock
+                    if (!running || !active || !isVr3Band) return@withLock
                     if (endOfStreamSignaled && inProcessedFrames >= inWriteFrames) return@withLock
 
+                    localBackend = currentBackend
                     myGen = seekGeneration.get()
                     destFrame = inProcessedFrames
                     val chunkStartFrame = destFrame - offsetSamples
@@ -738,14 +748,16 @@ class AiStemSeparationEngine(
                     }
                 }
 
-                if (!running || !active) continue
+                val backend = localBackend ?: continue
+                if (!running || !active || myGen != seekGeneration.get()) continue
 
                 try {
                     val t0 = System.currentTimeMillis()
                     vrDspEngine.forward(vrChunkInPcm, vrInputTensor)
                     val tDspFwd = System.currentTimeMillis()
 
-                    currentBackend.run(vrInputTensor, vrOutputTensor)
+                    if (myGen != seekGeneration.get()) continue
+                    backend.run(vrInputTensor, vrOutputTensor)
                     val tInf = System.currentTimeMillis()
 
                     // Extract vocal stem directly
@@ -755,7 +767,7 @@ class AiStemSeparationEngine(
                         stftEngine.centerCutPcm(vrVocalPcm, vrCenterPcm, validSamples)
                     }
                     val t1 = System.currentTimeMillis()
-                    Log.d(TAG, "VR 3-band chunk separated in ${t1 - t0} ms [fwd=${tDspFwd - t0}ms, nn=${tInf - tDspFwd}ms, inv=${t1 - tInf}ms] (valid: ${validSamples / 44100.0}s, hop: ${hopSamples / 44100.0}s, provider: ${currentBackend.providerName})")
+                    Log.d(TAG, "VR 3-band chunk separated in ${t1 - t0} ms [fwd=${tDspFwd - t0}ms, nn=${tInf - tDspFwd}ms, inv=${t1 - tInf}ms] (valid: ${validSamples / 44100.0}s, hop: ${hopSamples / 44100.0}s, provider: ${backend.providerName})")
 
                     var isStale = false
                     lock.withLock {
@@ -794,6 +806,7 @@ class AiStemSeparationEngine(
 
             } else {
                 // STFT spectrogram inference (UVR-MDX-NET / Kim Inst)
+                var localBackend: InferenceBackend? = null
                 var myGen = 0L
                 var startFrame = 0L
 
@@ -801,14 +814,17 @@ class AiStemSeparationEngine(
                     while (running && (!active || (
                         (inWriteFrames - inProcessedFrames) < CHUNK_SAMPLES && !endOfStreamSignaled
                     ))) {
+                        val genBefore = seekGeneration.get()
                         try {
                             workCond.await()
                         } catch (e: InterruptedException) {
                             return
                         }
+                        if (seekGeneration.get() != genBefore || isTimeDomain || isVr3Band) return@withLock
                     }
-                    if (!running || !active) return@withLock
+                    if (!running || !active || isTimeDomain || isVr3Band) return@withLock
 
+                    localBackend = currentBackend
                     myGen = seekGeneration.get()
                     startFrame = inProcessedFrames
                     val available = inWriteFrames - startFrame
@@ -832,16 +848,18 @@ class AiStemSeparationEngine(
                     }
                 }
 
-                if (!running || !active) continue
+                val backend = localBackend ?: continue
+                if (!running || !active || myGen != seekGeneration.get()) continue
 
                 try {
                     val t0 = System.currentTimeMillis()
-                    val currentBins = currentBackend.numBins
+                    val currentBins = backend.numBins
 
                     stftEngine.forward(chunkInPcm, chunkStftTensor, currentBins)
                     val tStft = System.currentTimeMillis()
 
-                    currentBackend.run(chunkStftTensor, chunkVocalTensor)
+                    if (myGen != seekGeneration.get()) continue
+                    backend.run(chunkStftTensor, chunkVocalTensor)
                     val tInf = System.currentTimeMillis()
 
                     val makeCenter = isPreserveSideActive
@@ -860,7 +878,7 @@ class AiStemSeparationEngine(
                         stftEngine.centerCutPcm(chunkRawVocalPcm, chunkCenterPcm, CHUNK_SAMPLES)
                     }
                     val t1 = System.currentTimeMillis()
-                    Log.d(TAG, "STFT chunk separated in ${t1 - t0} ms [stft=${tStft - t0}ms, nn=${tInf - tStft}ms, istft=${t1 - tInf}ms] (window: 5.92s, step: 4.92s, gen: $myGen, provider: ${currentBackend.providerName})")
+                    Log.d(TAG, "STFT chunk separated in ${t1 - t0} ms [stft=${tStft - t0}ms, nn=${tInf - tStft}ms, istft=${t1 - tInf}ms] (window: 5.92s, step: 4.92s, gen: $myGen, provider: ${backend.providerName})")
 
                     var isStale = false
                     lock.withLock {

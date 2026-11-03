@@ -31,7 +31,9 @@ JNIEXPORT void JNICALL
 Java_org_francasio_sing_audio_StftEngine_nativeForward(
         JNIEnv* env, jobject /*thiz*/, jlong handle, jfloatArray stereo_pcm, jfloatArray out_tensor, jint num_bins) {
     auto* engine = reinterpret_cast<sing::StftEngine*>(handle);
-    if (!engine) return;
+    if (!engine || !stereo_pcm || !out_tensor || num_bins <= 0 || num_bins > sing::MAX_N_BINS) return;
+    if (env->GetArrayLength(stereo_pcm) < 2 * sing::TOTAL_SAMPLES ||
+        env->GetArrayLength(out_tensor) < 4 * num_bins * sing::N_FRAMES) return;
 
     jfloat* pcm_ptr = env->GetFloatArrayElements(stereo_pcm, nullptr);
     jfloat* tensor_ptr = env->GetFloatArrayElements(out_tensor, nullptr);
@@ -46,7 +48,9 @@ JNIEXPORT void JNICALL
 Java_org_francasio_sing_audio_StftEngine_nativeInverse(
         JNIEnv* env, jobject /*thiz*/, jlong handle, jfloatArray in_tensor, jfloatArray out_stereo_pcm, jint num_bins) {
     auto* engine = reinterpret_cast<sing::StftEngine*>(handle);
-    if (!engine) return;
+    if (!engine || !in_tensor || !out_stereo_pcm || num_bins <= 0 || num_bins > sing::MAX_N_BINS) return;
+    if (env->GetArrayLength(in_tensor) < 4 * num_bins * sing::N_FRAMES ||
+        env->GetArrayLength(out_stereo_pcm) < 2 * sing::TOTAL_SAMPLES) return;
 
     jfloat* tensor_ptr = env->GetFloatArrayElements(in_tensor, nullptr);
     jfloat* pcm_ptr = env->GetFloatArrayElements(out_stereo_pcm, nullptr);
@@ -154,7 +158,9 @@ JNIEXPORT void JNICALL
 Java_org_francasio_sing_audio_VrDspEngine_nativeForward(
         JNIEnv* env, jobject /*thiz*/, jlong handle, jfloatArray stereoPcm, jfloatArray outTensor) {
     auto* engine = reinterpret_cast<sing::VrDspEngine*>(handle);
-    if (!engine) return;
+    if (!engine || !stereoPcm || !outTensor) return;
+    if (env->GetArrayLength(stereoPcm) < 2 * engine->getChunkSamples() ||
+        env->GetArrayLength(outTensor) < 2 * sing::VR_TOTAL_BINS * engine->getWindowFrames()) return;
 
     jfloat* pcm_ptr = env->GetFloatArrayElements(stereoPcm, nullptr);
     jfloat* tensor_ptr = env->GetFloatArrayElements(outTensor, nullptr);
@@ -169,7 +175,9 @@ JNIEXPORT void JNICALL
 Java_org_francasio_sing_audio_VrDspEngine_nativeInverse(
         JNIEnv* env, jobject /*thiz*/, jlong handle, jfloatArray inMaskTensor, jfloatArray outStereoPcm, jboolean isInstrumental) {
     auto* engine = reinterpret_cast<sing::VrDspEngine*>(handle);
-    if (!engine) return;
+    if (!engine || !inMaskTensor || !outStereoPcm) return;
+    if (env->GetArrayLength(inMaskTensor) < 2 * sing::VR_TOTAL_BINS * engine->getRoiFrames() ||
+        env->GetArrayLength(outStereoPcm) < 2 * engine->getRoiSamples()) return;
 
     jfloat* tensor_ptr = env->GetFloatArrayElements(inMaskTensor, nullptr);
     jfloat* pcm_ptr = env->GetFloatArrayElements(outStereoPcm, nullptr);
