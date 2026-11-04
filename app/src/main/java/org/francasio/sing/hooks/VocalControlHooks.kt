@@ -91,7 +91,7 @@ class VocalControlHooks(
                     val enabled = mode == 1
                     val processor = audioProcessor()
                     val wasSingActive = processor?.isEnabled == true
-                    val positionBeforeDisable = if (wasSingActive && !enabled) {
+                    val currentPosition = if (wasSingActive && !enabled) {
                         try {
                             ReflectionUtils.callMethod(controller, "getCurrentPosition") as? Long ?: -1L
                         } catch (_: Throwable) { -1L }
@@ -100,19 +100,30 @@ class VocalControlHooks(
 
                     processor?.isEnabled = enabled
                     onSingModeChanged(enabled)
-                    logInfo("LocalMediaPlayerController.setVocalAttenuationMode: mode=$mode (enabled=$enabled, pos=$positionBeforeDisable ms, cushion=$cushionMs ms)")
+                    logInfo("LocalMediaPlayerController.setVocalAttenuationMode: mode=$mode (enabled=$enabled, wasSingActive=$wasSingActive, pos=$currentPosition ms, cushion=$cushionMs ms)")
                     val result = chain.proceed()
 
-                    // Sing's inference path can have seconds of decoded-ahead audio. Do not
-                    // wait for that cushion to drain: switch to PCM bypass immediately, then
-                    // seek back to the position captured at toggle time to keep lyrics aligned.
-                    if (wasSingActive && !enabled && positionBeforeDisable >= 0L && cushionMs > 240L) {
-                        try {
-                            ReflectionUtils.callMethod(controller, "seekToPosition", positionBeforeDisable)
-                            logInfo("Sing disabled: immediately sought back to ${positionBeforeDisable} ms to restore audio/lyrics sync")
-                        } catch (t: Throwable) {
-                            logError("Failed to invoke seekToPosition after Sing disable", t)
-                        }
+                    if (wasSingActive && !enabled && currentPosition >= 0L && cushionMs > 240L) {
+                        val delayMs = cushionMs - 240L
+                        mainHandler.postDelayed({
+                            try {
+                                val activeController = currentPlayerController?.get() ?: controller
+                                val nowPosition = try {
+                                    ReflectionUtils.callMethod(activeController, "getCurrentPosition") as? Long
+                                        ?: currentPosition
+                                } catch (_: Throwable) { currentPosition }
+                                val targetMs = if (nowPosition >= currentPosition + delayMs / 2) {
+                                    maxOf(0L, nowPosition - delayMs)
+                                } else {
+                                    maxOf(0L, currentPosition - 300L)
+                                }
+                                logInfo("Sing disabled: nowPos=$nowPosition ms, currentPos=$currentPosition ms, delayMs=$delayMs ms -> targetMs=$targetMs ms")
+                                ReflectionUtils.callMethod(activeController, "seekToPosition", targetMs)
+                                logInfo("Triggered controller.seekToPosition($targetMs ms) to restore sync on Sing disable")
+                            } catch (t: Throwable) {
+                                logError("Failed to invoke seekToPosition after Sing disable", t)
+                            }
+                        }, 120L)
                     }
                     result
                 }
