@@ -32,6 +32,8 @@ app/.cxx/
 # Scratch & development artifacts
 scratch/
 artifacts/
+# Local agent testing notes (not public project documentation)
+/docs/TESTING.md
 *.log
 
 # Large weight / model binaries
@@ -48,4 +50,3 @@ libMNN.so
 app/src/main/cpp/kissfft/
 extern/kissfft/build/
 extern/kissfft/.build/
-

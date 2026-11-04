@@ -22,10 +22,8 @@ class SettingsRequestReceiver : BroadcastReceiver() {
         }
 
         if (intent.action == SingSettings.ACTION_REQUEST_SETTINGS) {
-            val ts = intent.getLongExtra("timestamp", System.currentTimeMillis())
-            val manager = intent.getStringExtra("manager_info") ?: "LSPatch"
-            SingSettings.saveHeartbeat(context, ts, manager, engineVersion = intent.getStringExtra("engine_version"))
-
+            // Exported broadcasts are notifications only. Heartbeats must come
+            // through the provider, where Binder identifies the actual caller.
             SingSettings.loadLocal(context)
             // Make sure the catalog is in memory before resolving the model:
             // without it the lookup used to fabricate native engine info for ANY

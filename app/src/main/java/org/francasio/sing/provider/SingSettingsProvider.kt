@@ -6,10 +6,19 @@ import android.database.Cursor
 import android.net.Uri
 import android.os.Bundle
 import android.os.ParcelFileDescriptor
+import android.os.Binder
 import java.io.File
 import java.io.FileNotFoundException
 
 class SingSettingsProvider : ContentProvider() {
+
+    private fun enforceTrustedCaller() {
+        val ctx = context ?: throw SecurityException("Provider unavailable")
+        val uid = Binder.getCallingUid()
+        if (uid == ctx.applicationInfo.uid) return
+        if (ctx.packageManager.getPackagesForUid(uid)?.contains("com.apple.android.music") == true) return
+        throw SecurityException("Only Sing and Apple Music may access this provider")
+    }
 
     override fun onCreate(): Boolean {
         context?.let { ctx ->
@@ -19,6 +28,7 @@ class SingSettingsProvider : ContentProvider() {
     }
 
     override fun call(method: String, arg: String?, extras: Bundle?): Bundle? {
+        enforceTrustedCaller()
         val ctx = context ?: return null
         return when (method) {
             SingSettings.METHOD_GET_SETTINGS -> {
@@ -40,10 +50,14 @@ class SingSettingsProvider : ContentProvider() {
                     // process can resolve native libs without relying on the
                     // (fragile) broadcast reply.
                     putString("module_apk_path", ctx.applicationInfo.sourceDir)
+                    val selected = File(ctx.filesDir, "selected_model.json")
+                    if (SingSettings.selectedModelId.isNotEmpty() && selected.isFile) {
+                        putString("selected_model_json", selected.readText())
+                    }
                 }
             }
             SingSettings.METHOD_HEARTBEAT -> {
-                val ts = extras?.getLong("timestamp", System.currentTimeMillis()) ?: System.currentTimeMillis()
+                val ts = System.currentTimeMillis()
                 val manager = extras?.getString("manager_info")
                 val activeProvider = extras?.getString("active_provider")
                 val engineVersion = extras?.getString("engine_version")
@@ -54,6 +68,9 @@ class SingSettingsProvider : ContentProvider() {
                 if (extras != null) {
                     val key = extras.getString("key")
                     if (key != null) {
+                        @Suppress("DEPRECATION")
+                        val value = extras.get("value")
+                        require(SettingsValidation.isValidSetting(key, value)) { "Invalid setting: $key" }
                         if (key == SingSettings.KEY_SELECTED_MODEL || key == SingSettings.KEY_HARDWARE_TARGET) {
                             val strVal = extras.getString("value")
                             if (strVal != null) {
@@ -74,7 +91,10 @@ class SingSettingsProvider : ContentProvider() {
     }
 
     override fun openFile(uri: Uri, mode: String): ParcelFileDescriptor? {
+        enforceTrustedCaller()
+        if (mode != "r") throw FileNotFoundException("Read-only provider")
         val fileName = uri.lastPathSegment ?: throw FileNotFoundException("No file name in URI: $uri")
+        if (!SettingsValidation.isModelFileName(fileName)) throw FileNotFoundException("Invalid model filename")
         val ctx = context ?: throw FileNotFoundException("Context is null")
         if (fileName == "models.json") {
             val jsonFile = File(ctx.filesDir, "models.json")

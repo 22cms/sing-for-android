@@ -364,6 +364,11 @@ object SingSettings {
                 val providerTarget = bundle.getString(KEY_HARDWARE_TARGET)
                 hardwareTarget = providerTarget ?: if (bundle.getBoolean(KEY_FORCE_CPU, forceCpu)) TARGET_CPU else TARGET_NPU
                 selectedModelId = sanitizeModelId(bundle.getString(KEY_SELECTED_MODEL, selectedModelId))
+                bundle.getString("selected_model_json")?.let { json ->
+                    org.francasio.sing.util.ModelLoader.registerSelectedModelJson(json)?.let { info ->
+                        if (info.id == selectedModelId) org.francasio.sing.util.ModelLoader.saveSelectedModel(context, info)
+                    }
+                }
                 allowZeroFloor = bundle.getBoolean(KEY_ALLOW_ZERO_FLOOR, allowZeroFloor)
                 forceSongEligibility = bundle.getBoolean(KEY_FORCE_SONG_ELIGIBILITY, forceSongEligibility)
 
@@ -462,99 +467,11 @@ object SingSettings {
     private var onChangeCallback: (() -> Unit)? = null
     private var settingsSyncRetryCount = 0
 
-    private fun handleSettingsUpdate(ctx: Context, intent: Intent) {
-        val newPreserveSide = intent.getBooleanExtra(KEY_PRESERVE_SIDE, preserveSide)
-        val newTwoWaySlider = intent.getBooleanExtra(KEY_TWO_WAY_SLIDER, twoWaySlider)
-        val newCenterGroupLyrics = intent.getBooleanExtra(KEY_CENTER_GROUP_LYRICS, centerGroupLyrics)
-        val newBlurUnfocusedLyrics = intent.getBooleanExtra(KEY_BLUR_UNFOCUSED_LYRICS, blurUnfocusedLyrics)
-        val newEnglishTranslationFallback = intent.getBooleanExtra(KEY_ENGLISH_TRANSLATION_FALLBACK, englishTranslationFallback)
-        val newThreadCount = intent.getIntExtra(KEY_THREAD_COUNT, threadCount)
-        val newEcoMode = intent.getBooleanExtra(KEY_ECO_MODE, ecoMode)
-        val newTarget = intent.getStringExtra(KEY_HARDWARE_TARGET) ?: (if (intent.getBooleanExtra(KEY_FORCE_CPU, forceCpu)) TARGET_CPU else TARGET_NPU)
-        val newModelId = sanitizeModelId(intent.getStringExtra(KEY_SELECTED_MODEL) ?: selectedModelId)
-        val newAllowZeroFloor = intent.getBooleanExtra(KEY_ALLOW_ZERO_FLOOR, allowZeroFloor)
-        val newForceSongEligibility = intent.getBooleanExtra(KEY_FORCE_SONG_ELIGIBILITY, forceSongEligibility)
-        val apkPath = intent.getStringExtra("module_apk_path")
-        if (!apkPath.isNullOrEmpty()) {
-            resolvedModulePath = apkPath
-            Log.i(TAG, "Updated resolvedModulePath from broadcast: $apkPath")
-        }
-        preserveSide = newPreserveSide
-        twoWaySlider = newTwoWaySlider
-        centerGroupLyrics = newCenterGroupLyrics
-        blurUnfocusedLyrics = newBlurUnfocusedLyrics
-        englishTranslationFallback = newEnglishTranslationFallback
-        threadCount = newThreadCount
-        ecoMode = newEcoMode
-        hardwareTarget = newTarget
-        selectedModelId = newModelId
-        allowZeroFloor = newAllowZeroFloor
-        forceSongEligibility = newForceSongEligibility
-
-        val modelFileName = intent.getStringExtra("model_file_name")
-        val engineFromApp = intent.getStringExtra("model_engine") ?: "onnx"
-        val infoIsConsistent = !(engineFromApp == "native" &&
-            sanitizeModelId(newModelId) != "apple_sing_native_fp32")
-        val existingCatalogModel = org.francasio.sing.util.ModelLoader.findCatalogModel(newModelId)
-        if (existingCatalogModel != null) {
-            // Model is already well-defined in models.json catalog - do not overwrite with fallback defaults
-        } else if (newModelId.isNotEmpty() && !modelFileName.isNullOrEmpty() && infoIsConsistent) {
-            val netType = intent.getStringExtra("model_network_type") ?: "time_domain"
-            val isVr = netType.equals("vr_3band", ignoreCase = true) || netType.equals("vr", ignoreCase = true)
-            val defaultNumFrames = if (isVr) 512 else 256
-            val defaultNumBins = if (isVr) 769 else 2048
-            val defaultFftSize = if (isVr) 768 else if (newModelId.contains("kim", ignoreCase = true)) 7680 else 6144
-            val defaultCompensation = if (newModelId.contains("kim", ignoreCase = true)) 1.02f else 1.035f
-            val defaultHopSize = if (isVr) 512 else 1024
-            val defaultChunkSamples = if (isVr) 261632 else 261120
-            val defaultCrossfade = if (isVr) 0 else 44100
-            val defaultHopSamples = if (isVr) 131072 else 217020
-            val mInfo = org.francasio.sing.util.ModelLoader.ModelInfo(
-                id = newModelId,
-                modelId = newModelId.substringBefore("_onnx").substringBefore("_litert").substringBefore("_mnn").substringBefore("_native"),
-                modelDisplayName = newModelId,
-                displayName = intent.getStringExtra("model_precision") ?: "FP16",
-                targetStem = intent.getStringExtra("model_target_stem") ?: "vocal",
-                networkType = netType,
-                numBins = intent.getIntExtra("model_num_bins", defaultNumBins),
-                numFrames = intent.getIntExtra("model_num_frames", defaultNumFrames),
-                fftSize = intent.getIntExtra("model_fft_size", defaultFftSize),
-                compensation = intent.getFloatExtra("model_compensation", defaultCompensation),
-                hopSize = intent.getIntExtra("model_hop_size", defaultHopSize),
-                chunkSamples = intent.getIntExtra("model_chunk_samples", defaultChunkSamples),
-                crossfadeSamples = intent.getIntExtra("model_crossfade_samples", defaultCrossfade),
-                hopSamples = intent.getIntExtra("model_hop_samples", defaultHopSamples),
-                blockSize = intent.getIntExtra("model_block_size", 4096),
-                lookaheadSize = intent.getIntExtra("model_lookahead_size", 16384),
-                engine = intent.getStringExtra("model_engine") ?: "onnx",
-                precision = intent.getStringExtra("model_precision") ?: "FP16",
-                fileName = modelFileName,
-                fileSizeDesc = ""
-            )
-            org.francasio.sing.util.ModelLoader.registerDynamicModel(mInfo)
-        } else if (!modelFileName.isNullOrEmpty() && !infoIsConsistent) {
-            Log.w(TAG, "Ignoring inconsistent model info from app for $newModelId (engine=$engineFromApp, file=$modelFileName) - resolving against local catalog")
-        }
-
-        try {
-            val prefs = ctx.getSharedPreferences(PREFS_CACHE, Context.MODE_PRIVATE)
-            prefs.edit()
-                .putBoolean(KEY_PRESERVE_SIDE, newPreserveSide)
-                .putBoolean(KEY_TWO_WAY_SLIDER, newTwoWaySlider)
-                .putBoolean(KEY_CENTER_GROUP_LYRICS, newCenterGroupLyrics)
-                .putBoolean(KEY_BLUR_UNFOCUSED_LYRICS, newBlurUnfocusedLyrics)
-                .putBoolean(KEY_ENGLISH_TRANSLATION_FALLBACK, newEnglishTranslationFallback)
-                .putInt(KEY_THREAD_COUNT, newThreadCount)
-                .putBoolean(KEY_ECO_MODE, newEcoMode)
-                .putString(KEY_HARDWARE_TARGET, newTarget)
-                .putBoolean(KEY_FORCE_CPU, newTarget == TARGET_CPU)
-                .putString(KEY_SELECTED_MODEL, newModelId)
-                .putBoolean(KEY_ALLOW_ZERO_FLOOR, newAllowZeroFloor)
-                .putBoolean(KEY_FORCE_SONG_ELIGIBILITY, newForceSongEligibility)
-                .apply()
-        } catch (t: Throwable) {}
-
-        Log.i(TAG, "Received settings broadcast: preserveSide=$preserveSide, twoWaySlider=$twoWaySlider, threads=$threadCount, ecoMode=$ecoMode, target=$hardwareTarget (forceCpu=$forceCpu), model=$selectedModelId, allowZeroFloor=$allowZeroFloor, forceSongEligibility=$forceSongEligibility")
+    private fun handleSettingsUpdate(ctx: Context) {
+        // A package-targeted broadcast is not authenticated. Ignore its payload
+        // and resolve settings/catalog through the caller-checked provider instead.
+        if (!syncSettingsFromProviderDirect(ctx)) return
+        org.francasio.sing.util.ModelLoader.loadModels(ctx)
         onChangeCallback?.invoke()
     }
 
@@ -599,7 +516,7 @@ object SingSettings {
                     val pending = goAsync()
                     asyncExecutor.execute {
                         try {
-                            handleSettingsUpdate(ctx, intent)
+                            handleSettingsUpdate(ctx)
                         } catch (t: Throwable) {
                             Log.e(TAG, "Error handling settings update in background", t)
                         } finally {

@@ -51,6 +51,7 @@ android {
         targetSdk = 34
         versionCode = 3
         versionName = "1.2"
+        testInstrumentationRunner = "org.francasio.sing.AudioRegressionInstrumentation"
 
         ndk {
             abiFilters.addAll(listOf("armeabi-v7a", "arm64-v8a", "x86_64"))
@@ -155,6 +156,22 @@ android {
         buildConfig = false
     }
 
+    testOptions {
+        unitTests.all {
+            // Opt-in host JNI tests; regular JVM tests do not need a native build.
+            providers.gradleProperty("nativeTestLibraryDir").orNull?.let { directory ->
+                it.systemProperty("java.library.path", directory)
+                it.systemProperty("sing.native.tests", "true")
+            }
+        }
+        unitTests.isReturnDefaultValues = providers.gradleProperty("nativeTestLibraryDir").isPresent
+    }
+
+    sourceSets {
+        getByName("test").java.srcDir("src/sharedTest/java")
+        getByName("androidTest").java.srcDir("src/sharedTest/java")
+    }
+
     packaging {
         resources {
             merges += "META-INF/xposed/*"
@@ -237,6 +254,7 @@ androidComponents {
 
 dependencies {
     testImplementation("junit:junit:4.13.2")
+    androidTestImplementation("junit:junit:4.13.2")
     testImplementation("org.json:json:20240303")
     // Vector 2.2 and LSPatch 1.2 provide libxposed API 102 at runtime. Keep compileOnly.
     compileOnly("io.github.libxposed:api:102.0.0")

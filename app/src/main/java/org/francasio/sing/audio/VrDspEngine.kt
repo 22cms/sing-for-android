@@ -1,11 +1,11 @@
 package org.francasio.sing.audio
 
-class VrDspEngine(windowFrames: Int = 512) : AutoCloseable {
+class VrDspEngine(windowFrames: Int = VrChunking.WINDOW_FRAMES) : AutoCloseable {
 
     companion object {
         const val VR_N_FFT = 768
         const val VR_TOTAL_BINS = 769
-        const val OFFSET_FRAMES = 128
+        const val OFFSET_FRAMES = VrChunking.CONTEXT_FRAMES
 
         init {
             try {
@@ -48,7 +48,7 @@ class VrDspEngine(windowFrames: Int = 512) : AutoCloseable {
         get() = roiFrames * 512
 
     val validRoiSamples: Int
-        get() = (roiFrames - 1) * 512
+        get() = VrChunking.validSamples(windowFrames)
 
     val inputTensorSize: Int
         get() = 2 * VR_TOTAL_BINS * windowFrames

@@ -43,7 +43,6 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import org.francasio.sing.audio.StftEngine
 import org.francasio.sing.provider.SingSettings
 import org.francasio.sing.ui.theme.AppleMusicSingTheme
 import org.francasio.sing.audio.backend.InferenceBackend
@@ -367,7 +366,7 @@ class MainActivity : ComponentActivity() {
                             val currentTarget = hardwareTarget
                             val currentModelId = selectedModelId
                             bgExecutor.execute {
-                                runBenchmark(currentThreads, currentTarget, currentModelId) { rtf, totalMs, stftMs, nnMs, istftMs, provider ->
+                                runBenchmark(currentThreads, currentTarget, currentModelId) { rtf, totalMs, stftMs, nnMs, istftMs, provider, audioFrames ->
                                     runOnUiThread {
                                         benchmarkState.value = BenchmarkUiState(
                                             isRunning = false,
@@ -378,7 +377,9 @@ class MainActivity : ComponentActivity() {
                                                 nnMs = nnMs,
                                                 istftMs = istftMs,
                                                 threadCount = currentThreads,
-                                                provider = provider
+                                                provider = provider,
+                                                modelId = currentModelId,
+                                                audioFramesPerRun = audioFrames
                                             )
                                         )
                                     }
@@ -547,13 +548,14 @@ class MainActivity : ComponentActivity() {
         threadCount: Int,
         hardwareTarget: String,
         modelId: String,
-        onResult: (rtf: Double, totalMs: Long, stftMs: Long, nnMs: Long, istftMs: Long, provider: String) -> Unit
+        onResult: (rtf: Double, totalMs: Long, stftMs: Long, nnMs: Long, istftMs: Long, provider: String, audioFrames: Int) -> Unit
     ) {
-        if (modelId.isEmpty()) return
         try {
+            require(modelId.isNotEmpty()) { "No model selected" }
             android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_BACKGROUND)
             android.util.Log.i("AppleSing_Bench", "Starting benchmark: threads=$threadCount, target=$hardwareTarget, modelId=$modelId")
-            val backend = ModelLoader.getOrCreateBackend(this, applicationInfo.sourceDir, threadCount, hardwareTarget, modelId) ?: return
+            val backend = ModelLoader.getOrCreateBackend(this, applicationInfo.sourceDir, threadCount, hardwareTarget, modelId)
+                ?: error("Could not initialize benchmark backend")
             val provider = ModelLoader.activeProviderShort
             android.util.Log.i("AppleSing_Bench", "Backend initialized: provider=${ModelLoader.activeProviderName}")
 
@@ -590,76 +592,19 @@ class MainActivity : ComponentActivity() {
                 val hasNan = pcmOut.any { it.isNaN() || it.isInfinite() }
 
                 android.util.Log.i("AppleSing_Bench", "Time-domain benchmark: avgNn=${avgNn}ms, rtf=$rtf, out[0]=${pcmOut[0]}, out[100]=${pcmOut[100]}, hasNaN=$hasNan")
-                onResult(rtf, avgNn, 0L, avgNn, 0L, provider)
+                onResult(rtf, avgNn, 0L, avgNn, 0L, provider, blockSize)
                 exportDebugIfRequested(backend)
                 return
             }
 
-            val stftEngine = StftEngine()
-
-            val chunkPcm = FloatArray(StftEngine.TOTAL_SAMPLES * 2)
-            // Fill with synthetic audio sine wave
-            val twoPi = 2.0 * Math.PI
-            for (i in 0 until StftEngine.TOTAL_SAMPLES) {
-                val s = (0.5 * sin(twoPi * 440.0 * i / 44100.0)).toFloat()
-                chunkPcm[i * 2] = s
-                chunkPcm[i * 2 + 1] = s
-            }
-
-            val bins = backend.numBins
-            val tensorSize = 4 * bins * StftEngine.N_FRAMES
-            val inTensor = FloatArray(tensorSize)
-            val outTensor = FloatArray(tensorSize)
-            val outPcm = FloatArray(StftEngine.TOTAL_SAMPLES * 2)
-
-            // Warmup pass
-            android.util.Log.i("AppleSing_Bench", "Warmup forward STFT (bins=$bins)...")
-            stftEngine.forward(chunkPcm, inTensor, bins)
-            android.util.Log.i("AppleSing_Bench", "Warmup backend.run...")
-            backend.run(inTensor, outTensor)
-            android.util.Log.i("AppleSing_Bench", "Warmup inverse STFT (bins=$bins)...")
-            stftEngine.inverse(outTensor, outPcm, bins)
-            android.util.Log.i("AppleSing_Bench", "Warmup completed. outTensor[0]=${outTensor[0]}, outTensor[100]=${outTensor[100]}")
-
-            // Benchmark iterations (3 runs)
-            var totalStftMs = 0L
-            var totalNnMs = 0L
-            var totalIstftMs = 0L
-
-            val iterations = 3
-            for (it in 0 until iterations) {
-                val t0 = System.currentTimeMillis()
-                stftEngine.forward(chunkPcm, inTensor, bins)
-                val t1 = System.currentTimeMillis()
-
-                backend.run(inTensor, outTensor)
-                val t2 = System.currentTimeMillis()
-
-                stftEngine.inverse(outTensor, outPcm, bins)
-                val t3 = System.currentTimeMillis()
-
-                totalStftMs += (t1 - t0)
-                totalNnMs += (t2 - t1)
-                totalIstftMs += (t3 - t2)
-            }
-
-            stftEngine.close()
-
-            val avgStft = totalStftMs / iterations
-            val avgNn = totalNnMs / iterations
-            val avgIstft = totalIstftMs / iterations
-            val avgTotal = avgStft + avgNn + avgIstft
-
-            val audioDurationMs = (StftEngine.TOTAL_SAMPLES * 1000.0) / 44100.0 // 5944.3 ms
-            val rtf = if (avgTotal > 0) audioDurationMs / avgTotal else 10.0
-
-            android.util.Log.i("AppleSing_Bench", "Benchmark successful: avgTotal=${avgTotal}ms, rtf=$rtf")
-            onResult(rtf, avgTotal, avgStft, avgNn, avgIstft, provider)
+            val result = org.francasio.sing.audio.SpectralBenchmark.run(backend)
+            android.util.Log.i("AppleSing_Bench", "Benchmark successful: avgTotal=${result.totalMs}ms, rtf=${result.rtf}")
+            onResult(result.rtf, result.totalMs, result.forwardMs, result.inferenceMs, result.inverseMs, provider, result.audioFrames)
             exportDebugIfRequested(backend)
 
         } catch (e: Throwable) {
             android.util.Log.e("AppleSing_Bench", "Benchmark failed: ${e.javaClass.simpleName}: ${e.message}", e)
-            onResult(0.0, 0L, 0L, 0L, 0L, "")
+            onResult(0.0, 0L, 0L, 0L, 0L, "", 0)
         }
     }
 
@@ -720,8 +665,8 @@ class MainActivity : ComponentActivity() {
             val mnnBackend = intent.getIntExtra("mnn_backend", org.francasio.sing.audio.backend.MnnInferenceBackend.targetToPreference(target))
             org.francasio.sing.audio.backend.MnnInferenceBackend.currentBackendPreference = mnnBackend
             bgExecutor.execute {
-                runBenchmark(t, target, m) { rtf, totalMs, stftMs, nnMs, istftMs, provider ->
-                    android.util.Log.i("AppleSing_Bench", "Benchmark intent result: rtf=$rtf, total=$totalMs, stft=$stftMs, nn=$nnMs, istft=$istftMs, provider=$provider")
+                runBenchmark(t, target, m) { rtf, totalMs, stftMs, nnMs, istftMs, provider, audioFrames ->
+                    android.util.Log.i("AppleSing_Bench", "Benchmark intent result: rtf=$rtf, total=$totalMs, stft=$stftMs, nn=$nnMs, istft=$istftMs, provider=$provider, audioFrames=$audioFrames")
                 }
             }
         }

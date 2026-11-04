@@ -51,7 +51,9 @@ data class BenchmarkResult(
     val nnMs: Long,
     val istftMs: Long,
     val threadCount: Int,
-    val provider: String = ""
+    val provider: String = "",
+    val modelId: String = "",
+    val audioFramesPerRun: Int = 0
 )
 
 @Composable

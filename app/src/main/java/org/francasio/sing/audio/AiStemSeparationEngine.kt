@@ -13,8 +13,8 @@ import kotlin.concurrent.withLock
  * Streaming Neural Stem Separation Engine.
  * Supports both STFT spectrogram models (UVR-MDX-NET, Kim Inst)
  * and direct Time-Domain streaming models (Apple Sing Vi-NNet).
- * Employs a non-blocking ring-buffer pipeline to isolate stems
- * with zero audio thread latency and robust seek synchronization.
+ * Uses a bounded ring-buffer pipeline with background inference and
+ * serialized seek/backend resets.
  */
 class AiStemSeparationEngine(
     initialBackend: InferenceBackend
@@ -24,7 +24,7 @@ class AiStemSeparationEngine(
         const val CHUNK_SAMPLES = StftEngine.TOTAL_SAMPLES // 261,120 frames (~5.92s @ 44.1kHz)
         const val CROSSFADE_SAMPLES = 44100               // 44,100 frames (~1.0s crossfade between chunks)
         const val HOP_SAMPLES = CHUNK_SAMPLES - CROSSFADE_SAMPLES // 217,020 frames (~4.92s step, 1.4x+ real-time)
-        const val VR_CROSSFADE_SAMPLES = 16384           // 16,384 frames (~0.37s smooth crossfade)
+        const val VR_CROSSFADE_SAMPLES = VrChunking.CROSSFADE_SAMPLES // 4,096 frames (~93 ms)
         const val PRE_ROLL_FRAMES = CHUNK_SAMPLES + HOP_SAMPLES // 478,140 frames (~10.84s initial buffer)
         const val MAX_CUSHION_FRAMES = CHUNK_SAMPLES + 2 * HOP_SAMPLES // 695,160 frames (~15.76s max cushion)
         const val ECO_TARGET_CUSHION_FRAMES = CHUNK_SAMPLES // 261,120 frames (~5.92s target buffer)
@@ -83,6 +83,8 @@ class AiStemSeparationEngine(
     private var hasPreviousVocal = false
 
     private val lock = ReentrantLock()
+    // Lock order: processingLock, then lock. Never hold this while waiting for input/pacing.
+    private val processingLock = ReentrantLock(true)
     private val workCond = lock.newCondition()
     private val pacingCond = lock.newCondition()
     @Volatile private var running = true
@@ -95,7 +97,6 @@ class AiStemSeparationEngine(
         workerLoop()
     }, "AppleSing_AiWorker").apply {
         isDaemon = true
-        start()
     }
 
     @Volatile var active: Boolean = false
@@ -127,6 +128,13 @@ class AiStemSeparationEngine(
 
     @Volatile private var currentBackend: InferenceBackend = initialBackend
 
+    init {
+        workerThread.start()
+    }
+
+    private fun <T> withPipelineState(action: () -> T): T =
+        processingLock.withLock { lock.withLock(action) }
+
     val isTimeDomain: Boolean
         get() = currentBackend.modelInfo.isTimeDomain
 
@@ -135,6 +143,8 @@ class AiStemSeparationEngine(
 
     val isInstrumental: Boolean
         get() = currentBackend.modelInfo.isInstrumental
+
+    internal fun usesBackend(backend: InferenceBackend): Boolean = currentBackend === backend
 
     private fun flushBuffersLocked() {
         java.util.Arrays.fill(inRing, 0.0f)
@@ -164,10 +174,12 @@ class AiStemSeparationEngine(
     }
 
     fun updateBackend(newBackend: InferenceBackend) {
-        lock.withLock {
+        if (currentBackend === newBackend) return
+        withPipelineState {
+            if (!running) return@withPipelineState
             // Settings/heartbeat refreshes can return the cached instance.
             // Flushing it would drop the entire decoded-ahead audio cushion.
-            if (currentBackend === newBackend) return
+            if (currentBackend === newBackend) return@withPipelineState
             currentBackend = newBackend
             stftEngine.configure(
                 newBackend.modelInfo.fftSize,
@@ -193,8 +205,8 @@ class AiStemSeparationEngine(
     }
 
     fun activate() {
-        lock.withLock {
-            if (!active) {
+        withPipelineState {
+            if (running && !active) {
                 active = true
                 seekGeneration.incrementAndGet()
                 isBufferingInitialChunk = true
@@ -216,24 +228,17 @@ class AiStemSeparationEngine(
     }
 
     fun deactivate() {
+        // Invalidate publication immediately without making the UI wait for a
+        // potentially long NN call. activate() resets buffers before reusing them.
         lock.withLock {
             if (active) {
                 active = false
                 seekGeneration.incrementAndGet()
                 isBufferingInitialChunk = false
                 endOfStreamSignaled = false
-                inWriteFrames = 0L
-                inProcessedFrames = 0L
-                vocalWriteFrames = 0L
-                vocalReadFrames = 0L
-                centerStartFrame = 0L
-                centerEndFrame = 0L
-                currentBackend.resetStates()
-                vrDspEngine.reset()
-                flushBuffersLocked()
                 workCond.signalAll()
                 pacingCond.signalAll()
-                Log.i(TAG, "AI engine deactivated (0% CPU)")
+                Log.i(TAG, "AI engine deactivated; in-flight output invalidated")
             }
         }
         MediaClockSyncHook.isBuffering = false
@@ -243,10 +248,14 @@ class AiStemSeparationEngine(
 
     /**
      * Called by ExoPlayer's audio thread to push incoming raw PCM floats.
-     * Non-blocking, executes in < 0.02 ms.
+     * Only shares the short buffer/publication lock, not the inference lock.
      */
-    fun pushInput(samples: FloatArray, frameCount: Int) {
-        if (!active) return
+    fun pushInput(samples: FloatArray, frameCount: Int) = lock.withLock {
+        if (!active || !running) return@withLock
+        require(frameCount >= 0 && frameCount <= samples.size / 2)
+        check(inWriteFrames + frameCount - minOf(vocalReadFrames, inProcessedFrames) < RING_SIZE) {
+            "Input ring capacity exceeded"
+        }
 
         val totalFloats = frameCount * 2
         val wp = inWriteFrames
@@ -256,9 +265,7 @@ class AiStemSeparationEngine(
         }
         inWriteFrames = wp + frameCount
 
-        lock.withLock {
-            workCond.signal()
-        }
+        workCond.signal()
     }
 
     val isReady: Boolean
@@ -279,28 +286,12 @@ class AiStemSeparationEngine(
     val targetCushionFrames: Long
         get() = when {
             isTimeDomain -> 88200L // ~2.0s
-            isVr3Band -> vrDspEngine.chunkSamples.toLong() + 2L * (vrDspEngine.validRoiSamples - VR_CROSSFADE_SAMPLES) // 261,632 + 2 * 114,176 = 489,984 (~11.1s)
+            isVr3Band -> vrDspEngine.chunkSamples.toLong() + 2L * VrChunking.hopSamples(vrDspEngine.windowFrames)
             else -> PRE_ROLL_FRAMES.toLong() // 478,140 (~10.8s)
         }
 
     val needsBurst: Boolean
         get() = active && !endOfStreamSignaled && (cushionFrames < targetCushionFrames)
-
-    val needsInitialChunkBurst: Boolean
-        get() = needsBurst
-
-    val hasInitialChunkGathered: Boolean
-        get() = when {
-            isTimeDomain -> {
-                active && ((inWriteFrames - inProcessedFrames) >= currentBackend.modelInfo.blockSize)
-            }
-            isVr3Band -> {
-                active && ((inWriteFrames - inProcessedFrames) >= (vrDspEngine.chunkSamples - VrDspEngine.OFFSET_FRAMES * 512))
-            }
-            else -> {
-                active && ((inWriteFrames - inProcessedFrames) >= CHUNK_SAMPLES)
-            }
-        }
 
     /**
      * Flow control check called before accepting new audio frames into the pipeline.
@@ -314,7 +305,8 @@ class AiStemSeparationEngine(
         }
 
         // Steady-state backpressure: enforce max cushion to guarantee zero ring buffer wraparound
-        val cushion = inWriteFrames - vocalReadFrames
+        // Retain input until BOTH playback and inference have passed it.
+        val cushion = inWriteFrames - minOf(vocalReadFrames, inProcessedFrames)
         return (cushion + frameCount) < MAX_CUSHION_FRAMES
     }
 
@@ -337,8 +329,11 @@ class AiStemSeparationEngine(
         }
     }
 
-    fun isEnded(): Boolean {
-        return !active || (endOfStreamSignaled && inProcessedFrames >= inWriteFrames && vocalReadFrames >= vocalWriteFrames)
+    fun isEnded(): Boolean = lock.withLock {
+        // inProcessedFrames advances when work is gathered, before inference
+        // publishes it. EOS must also account for every frame of source audio.
+        !active || (endOfStreamSignaled && inProcessedFrames >= inWriteFrames &&
+            vocalReadFrames >= inWriteFrames && vocalReadFrames >= vocalWriteFrames)
     }
 
     /**
@@ -349,13 +344,13 @@ class AiStemSeparationEngine(
         outSamples: FloatArray,
         frameCount: Int,
         vocalLevel: Float
-    ): Int {
+    ): Int = lock.withLock {
         if (!active) {
-            return 0
+            return@withLock 0
         }
 
         if (vocalWriteFrames == 0L) {
-            return 0
+            return@withLock 0
         }
 
         if (isBufferingInitialChunk) {
@@ -367,7 +362,8 @@ class AiStemSeparationEngine(
         }
 
         val availableVocal = (vocalWriteFrames - vocalReadFrames).toInt()
-        val toBlend = minOf(frameCount, maxOf(0, availableVocal))
+        val framesToOutput = minOf(frameCount, maxOf(0L, inWriteFrames - vocalReadFrames).toInt())
+        val toBlend = minOf(framesToOutput, maxOf(0, availableVocal))
         var rp = vocalReadFrames
 
         val isPreserveSide = isPreserveSideActive
@@ -464,10 +460,10 @@ class AiStemSeparationEngine(
         }
 
         // 2. Graceful underrun protection with smooth ramp
-        if (toBlend < frameCount) {
-            val missing = frameCount - toBlend
+        if (toBlend < framesToOutput) {
+            val missing = framesToOutput - toBlend
             val invMissing = 1.0f / missing.toFloat()
-            for (i in toBlend until frameCount) {
+            for (i in toBlend until framesToOutput) {
                 val idx = ((rp * 2) and (RING_MASK * 2 + 1).toLong()).toInt()
                 val rampToRaw = (i - toBlend) * invMissing
                 val inL = inRing[idx]
@@ -481,12 +477,13 @@ class AiStemSeparationEngine(
             }
         }
 
-        vocalReadFrames = minOf(vocalWriteFrames, rp)
-        return frameCount
+        vocalReadFrames = rp
+        pacingCond.signalAll()
+        framesToOutput
     }
 
     fun reset() {
-        lock.withLock {
+        withPipelineState {
             seekGeneration.incrementAndGet()
             inWriteFrames = 0L
             inProcessedFrames = 0L
@@ -519,8 +516,8 @@ class AiStemSeparationEngine(
         while (running) {
             if (isTimeDomain) {
                 // Time-domain inference (Apple Sing Vi-NNet: 4096-frame blocks with lookahead)
-                val blockSize = currentBackend.modelInfo.blockSize
-                val lookaheadSize = currentBackend.modelInfo.lookaheadSize
+                var blockSize = 0
+                var lookaheadSize = 0
 
                 var localBackend: InferenceBackend? = null
                 var myGen = 0L
@@ -529,7 +526,8 @@ class AiStemSeparationEngine(
 
                 lock.withLock {
                     while (running && (!active || (
-                        (inWriteFrames - inProcessedFrames) < blockSize && !endOfStreamSignaled
+                        if (endOfStreamSignaled) vocalWriteFrames >= inWriteFrames
+                        else (inWriteFrames - inProcessedFrames) < currentBackend.modelInfo.blockSize
                     ))) {
                         val genBefore = seekGeneration.get()
                         try {
@@ -542,6 +540,8 @@ class AiStemSeparationEngine(
                     if (!running || !active || !isTimeDomain) return@withLock
 
                     localBackend = currentBackend
+                    blockSize = currentBackend.modelInfo.blockSize
+                    lookaheadSize = currentBackend.modelInfo.lookaheadSize
                     myGen = seekGeneration.get()
                     startFrame = inProcessedFrames
                     val available = inWriteFrames - startFrame
@@ -559,7 +559,9 @@ class AiStemSeparationEngine(
                             timeDomainInPcm[i] = inRing[idx]
                         }
                         java.util.Arrays.fill(timeDomainInPcm, availCount * 2, blockSize * 2, 0.0f)
-                        inProcessedFrames = inWriteFrames
+                        // Padding still advances the model by a full block. Future
+                        // lookahead flushes must retain that block-aligned timeline.
+                        inProcessedFrames = startFrame + blockSize
                     } else if (endOfStreamSignaled && vocalWriteFrames < inWriteFrames) {
                         // Flushing remaining lookahead delay frames with zero padding
                         java.util.Arrays.fill(timeDomainInPcm, 0, blockSize * 2, 0.0f)
@@ -572,7 +574,9 @@ class AiStemSeparationEngine(
                 val backend = localBackend ?: continue
                 if (!running || !active || myGen != seekGeneration.get()) continue
 
+                processingLock.lock()
                 try {
+                    if (!running || !active || myGen != seekGeneration.get()) continue
                     val nnT0 = System.nanoTime()
                     if (myGen != seekGeneration.get()) continue
                     backend.runTimeDomain(timeDomainInPcm, timeDomainOutPcm, blockSize)
@@ -664,29 +668,15 @@ class AiStemSeparationEngine(
                             }
 
                             workCond.signalAll()
-
-                            // Eco-mode thermal pacing
-                            val curCushion = maxOf(0L, vocalWriteFrames - vocalReadFrames)
-                            val targetCushion = 88200L // ~2.0s target cushion for time-domain
-                            if (ecoMode && !endOfStreamSignaled && curCushion > targetCushion) {
-                                while (running && active && ecoMode && !endOfStreamSignaled && myGen == seekGeneration.get()) {
-                                    val cushion = maxOf(0L, vocalWriteFrames - vocalReadFrames)
-                                    if (cushion <= targetCushion) break
-                                    val excess = cushion - targetCushion
-                                    val waitMs = minOf(200L, maxOf(20L, (excess * 1000L) / 44100L))
-                                    try {
-                                        pacingCond.await(waitMs, java.util.concurrent.TimeUnit.MILLISECONDS)
-                                    } catch (e: InterruptedException) {
-                                        return
-                                    }
-                                }
-                            }
                         }
                     }
                     if (isStale) continue
                 } catch (e: Throwable) {
                     Log.e(TAG, "Time-domain inference error: ${e.message}", e)
+                } finally {
+                    processingLock.unlock()
                 }
+                paceWorker(myGen, 88200L)
 
             } else if (isVr3Band) {
                 // VR 3-band architecture inference (12_SP-UVR-3B-44100, etc.)
@@ -696,13 +686,14 @@ class AiStemSeparationEngine(
                 val chunkSamples = vrDspEngine.chunkSamples
                 val validSamples = vrDspEngine.validRoiSamples
                 val crossfadeSamples = VR_CROSSFADE_SAMPLES
-                val hopSamples = validSamples - crossfadeSamples
+                val hopSamples = VrChunking.hopSamples(vrDspEngine.windowFrames)
                 val offsetSamples = VrDspEngine.OFFSET_FRAMES * 512L
                 val minInputNeeded = chunkSamples - offsetSamples
 
                 lock.withLock {
                     while (running && (!active || (
-                        (inWriteFrames - inProcessedFrames) < minInputNeeded && !endOfStreamSignaled
+                        if (endOfStreamSignaled) inProcessedFrames >= inWriteFrames
+                        else (inWriteFrames - inProcessedFrames) < minInputNeeded
                     ))) {
                         val genBefore = seekGeneration.get()
                         try {
@@ -751,7 +742,9 @@ class AiStemSeparationEngine(
                 val backend = localBackend ?: continue
                 if (!running || !active || myGen != seekGeneration.get()) continue
 
+                processingLock.lock()
                 try {
+                    if (!running || !active || myGen != seekGeneration.get()) continue
                     val t0 = System.currentTimeMillis()
                     vrDspEngine.forward(vrChunkInPcm, vrInputTensor)
                     val tDspFwd = System.currentTimeMillis()
@@ -780,29 +773,15 @@ class AiStemSeparationEngine(
                             }
 
                             workCond.signalAll()
-
-                            // Thermal pacing
-                            val curCushion = maxOf(0L, vocalWriteFrames - vocalReadFrames)
-                            val targetCushion = 262144L // ~5.9s (at least 2 full chunks cushion)
-                            if (ecoMode && !endOfStreamSignaled && curCushion > targetCushion) {
-                                while (running && active && ecoMode && !endOfStreamSignaled && myGen == seekGeneration.get()) {
-                                    val cushion = maxOf(0L, vocalWriteFrames - vocalReadFrames)
-                                    if (cushion <= targetCushion) break
-                                    val excessFrames = cushion - targetCushion
-                                    val waitMs = minOf(300L, maxOf(20L, (excessFrames * 1000L) / 44100L))
-                                    try {
-                                        pacingCond.await(waitMs, java.util.concurrent.TimeUnit.MILLISECONDS)
-                                    } catch (e: InterruptedException) {
-                                        return
-                                    }
-                                }
-                            }
                         }
                     }
                     if (isStale) continue
                 } catch (e: Throwable) {
                     Log.e(TAG, "VR separation error: ${e.message}", e)
+                } finally {
+                    processingLock.unlock()
                 }
+                paceWorker(myGen, 262144L)
 
             } else {
                 // STFT spectrogram inference (UVR-MDX-NET / Kim Inst)
@@ -812,7 +791,8 @@ class AiStemSeparationEngine(
 
                 lock.withLock {
                     while (running && (!active || (
-                        (inWriteFrames - inProcessedFrames) < CHUNK_SAMPLES && !endOfStreamSignaled
+                        if (endOfStreamSignaled) inProcessedFrames >= inWriteFrames
+                        else (inWriteFrames - inProcessedFrames) < CHUNK_SAMPLES
                     ))) {
                         val genBefore = seekGeneration.get()
                         try {
@@ -851,7 +831,9 @@ class AiStemSeparationEngine(
                 val backend = localBackend ?: continue
                 if (!running || !active || myGen != seekGeneration.get()) continue
 
+                processingLock.lock()
                 try {
+                    if (!running || !active || myGen != seekGeneration.get()) continue
                     val t0 = System.currentTimeMillis()
                     val currentBins = backend.numBins
 
@@ -890,26 +872,6 @@ class AiStemSeparationEngine(
                                 writeCenterWithOverlapAdd(chunkCenterPcm, startFrame)
                             }
                             workCond.signalAll()
-
-                            val curCushion = maxOf(0L, vocalWriteFrames - vocalReadFrames)
-                            if (ecoMode && !endOfStreamSignaled) {
-                                var cushion = curCushion
-                                if (cushion > ECO_TARGET_CUSHION_FRAMES) {
-                                    while (running && active && ecoMode && !endOfStreamSignaled && myGen == seekGeneration.get()) {
-                                        cushion = maxOf(0L, vocalWriteFrames - vocalReadFrames)
-                                        if (cushion <= ECO_TARGET_CUSHION_FRAMES) {
-                                            break
-                                        }
-                                        val excessFrames = cushion - ECO_TARGET_CUSHION_FRAMES
-                                        val waitMs = minOf(500L, maxOf(20L, (excessFrames * 1000L) / 44100L))
-                                        try {
-                                            pacingCond.await(waitMs, java.util.concurrent.TimeUnit.MILLISECONDS)
-                                        } catch (e: InterruptedException) {
-                                            return
-                                        }
-                                    }
-                                }
-                            }
                         }
                     }
                     if (isStale) {
@@ -919,6 +881,22 @@ class AiStemSeparationEngine(
 
                 } catch (e: Throwable) {
                     Log.e(TAG, "AI separation error: ${e.message}", e)
+                } finally {
+                    processingLock.unlock()
+                }
+                paceWorker(myGen, ECO_TARGET_CUSHION_FRAMES.toLong())
+            }
+        }
+    }
+
+    private fun paceWorker(generation: Long, target: Long) {
+        lock.withLock {
+            while (running && active && ecoMode && !endOfStreamSignaled && generation == seekGeneration.get() &&
+                vocalWriteFrames - vocalReadFrames > target) {
+                try {
+                    pacingCond.await(200L, java.util.concurrent.TimeUnit.MILLISECONDS)
+                } catch (_: InterruptedException) {
+                    return
                 }
             }
         }
@@ -948,13 +926,12 @@ class AiStemSeparationEngine(
             }
             vocalWriteFrames = actualEnd
         } else {
-            val invCrossfade = 1.0f / crossfadeSamples.toFloat()
             val overlapEnd = minOf(crossfadeSamples, validSamples)
             for (i in 0 until overlapEnd) {
                 val framePos = chunkDestFrame + i
                 val idx = ((framePos * 2) and (RING_MASK * 2 + 1).toLong()).toInt()
 
-                val ramp = i * invCrossfade
+                val ramp = VrChunking.crossfadeWeight(i, overlapEnd)
                 val invRamp = 1.0f - ramp
 
                 val prevL = vocalRing[idx]
@@ -996,7 +973,6 @@ class AiStemSeparationEngine(
         }
         val hasOverlap = centerEndFrame > chunkDestFrame
         val overlap = if (hasOverlap) minOf(crossfadeSamples.toLong(), centerEndFrame - chunkDestFrame).toInt() else 0
-        val invCrossfade = if (overlap > 0) 1.0f / overlap.toFloat() else 1.0f
 
         for (i in 0 until validSamples) {
             val framePos = chunkDestFrame + i
@@ -1007,7 +983,7 @@ class AiStemSeparationEngine(
             val cleanR = if (sR.isNaN() || sR.isInfinite()) 0.0f else sR
 
             if (i < overlap) {
-                val ramp = i * invCrossfade
+                val ramp = VrChunking.crossfadeWeight(i, overlap)
                 centerRing[idx] = (1.0f - ramp) * centerRing[idx] + ramp * cleanL
                 centerRing[idx + 1] = (1.0f - ramp) * centerRing[idx + 1] + ramp * cleanR
             } else {
@@ -1081,11 +1057,27 @@ class AiStemSeparationEngine(
     }
 
     fun release() {
-        running = false
         lock.withLock {
+            if (!running) return
+            running = false
+            active = false
+            seekGeneration.incrementAndGet()
             workCond.signalAll()
             pacingCond.signalAll()
         }
-        stftEngine.close()
+        // An inference may still be using the native DSP objects. Never free them early.
+        var interrupted = false
+        while (workerThread.isAlive) {
+            try {
+                workerThread.join()
+            } catch (_: InterruptedException) {
+                interrupted = true
+            }
+        }
+        withPipelineState {
+            stftEngine.close()
+            vrDspEngine.close()
+        }
+        if (interrupted) Thread.currentThread().interrupt()
     }
 }

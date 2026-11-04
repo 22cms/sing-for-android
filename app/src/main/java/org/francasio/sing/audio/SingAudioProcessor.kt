@@ -30,6 +30,11 @@ class SingAudioProcessor(
         const val ENCODING_PCM_24BIT = 0x20000000 // 536,870,912
         const val ENCODING_PCM_32BIT = 0x30000000 // 805,306,368
 
+        private fun isSupportedEncoding(encoding: Int): Boolean = when (encoding) {
+            ENCODING_PCM_16BIT, ENCODING_PCM_FLOAT, ENCODING_PCM_24BIT, ENCODING_PCM_32BIT -> true
+            else -> false
+        }
+
         fun getBytesPerSample(encoding: Int): Int = when (encoding) {
             ENCODING_PCM_16BIT -> 2
             ENCODING_PCM_FLOAT -> 4
@@ -71,6 +76,7 @@ class SingAudioProcessor(
     var vocalLevel: Float = 0.0f
 
     @Volatile
+    @set:Synchronized
     var isEnabled: Boolean = false
         set(value) {
             val wasEnabled = field
@@ -78,9 +84,8 @@ class SingAudioProcessor(
             if (value && !wasEnabled) {
                 if (aiEngine == null) {
                     ensureEngineInitialized()
-                } else {
-                    aiEngine?.activate()
                 }
+                // Activation/reset belongs to the playback thread, not the UI.
             } else if (!value && wasEnabled) {
                 aiEngine?.deactivate()
                 downResampler?.reset()
@@ -113,6 +118,12 @@ class SingAudioProcessor(
     private var downResampler: StereoResampler? = null
     private var upResampler: StereoResampler? = null
     private var currentSampleRate: Int = -1
+    private var sourceFrames = 0L
+    private var outputFramesWritten = 0L
+    private var sourceEnded = false
+    private var outputResamplerDrained = false
+    @Volatile private var released = false
+    private val initializationGeneration = java.util.concurrent.atomic.AtomicLong()
 
     private var logCounter = 0
 
@@ -128,57 +139,7 @@ class SingAudioProcessor(
     init {
         // Initialize settings and register live update receiver
         SingSettings.initInAppleMusic(context, managerInfo) {
-            val selectedModel = SingSettings.selectedModelId
-            if (selectedModel.isEmpty()) {
-                val old = aiEngine
-                aiEngine = null
-                old?.deactivate()
-                Log.i(TAG, "No model selected. Neural Stem Separation Engine disabled (pass-through mode).")
-                isEngineReady = true
-                onEngineReadyListener?.invoke()
-                onSettingsChanged()
-                return@initInAppleMusic
-            }
-
-            val engine = aiEngine
-            if (engine != null) {
-                engine.preserveSide = SingSettings.preserveSide
-                engine.twoWaySlider = SingSettings.twoWaySlider
-                engine.ecoMode = SingSettings.ecoMode
-                Log.i(TAG, "Updated live settings: preserveSide=${engine.preserveSide}, twoWaySlider=${engine.twoWaySlider}, ecoMode=${engine.ecoMode}")
-
-                val currentThreads = ModelLoader.threadCount
-                val currentTarget = ModelLoader.currentTarget
-                val currentModel = ModelLoader.currentModelId
-                // Match ModelLoader's cache policy: NPU requests reuse the
-                // backend regardless of thread count (including CPU fallback).
-                val threadsChanged = SingSettings.hardwareTarget != SingSettings.TARGET_NPU &&
-                    SingSettings.threadCount != currentThreads
-                if (threadsChanged || SingSettings.hardwareTarget != currentTarget || selectedModel != currentModel) {
-                    isEngineReady = false
-                    bgExecutor.execute {
-                        try {
-                            val activePath = SingSettings.resolvedModulePath ?: moduleApkPath
-                            val newBackend = ModelLoader.getOrCreateBackend(
-                                context,
-                                activePath,
-                                SingSettings.threadCount,
-                                SingSettings.hardwareTarget,
-                                selectedModel
-                            )
-                            if (newBackend != null) {
-                                engine.updateBackend(newBackend)
-                                isEngineReady = true
-                                onEngineReadyListener?.invoke()
-                            }
-                        } catch (t: Throwable) {
-                            Log.w(TAG, "Failed to update inference backend: ${t.message}")
-                        }
-                    }
-                }
-            } else {
-                ensureEngineInitialized()
-            }
+            ensureEngineInitialized()
             onSettingsChanged()
         }
 
@@ -186,49 +147,64 @@ class SingAudioProcessor(
         ensureEngineInitialized()
     }
 
+    @Synchronized
     fun ensureEngineInitialized() {
+        if (released) return
+        val generation = initializationGeneration.incrementAndGet()
         val selectedModel = SingSettings.selectedModelId
-        if (selectedModel.isEmpty()) {
-            isEngineReady = true
-            onEngineReadyListener?.invoke()
-            return
+        val threads = SingSettings.threadCount
+        val target = SingSettings.hardwareTarget
+        if (ModelLoader.currentModelId != selectedModel || ModelLoader.currentTarget != target ||
+            (target != SingSettings.TARGET_NPU && ModelLoader.threadCount != threads)) {
+            isEngineReady = false
         }
-        val currentEngine = aiEngine
-        if (currentEngine != null && ModelLoader.currentModelId == selectedModel) {
-            isEngineReady = true
-            return
-        }
-
-        isEngineReady = false
         bgExecutor.execute {
-            val engine = aiEngine
-            val targetModel = SingSettings.selectedModelId
-            if (engine != null && ModelLoader.currentModelId == targetModel) {
-                isEngineReady = true
-                return@execute
-            }
+            if (released || generation != initializationGeneration.get()) return@execute
             try {
+                if (selectedModel.isEmpty()) {
+                    val old = synchronized(this) {
+                        aiEngine.also {
+                            aiEngine = null
+                            isEngineReady = true
+                        }
+                    }
+                    old?.release()
+                    onEngineReadyListener?.invoke()
+                    return@execute
+                }
                 val activePath = SingSettings.resolvedModulePath ?: moduleApkPath
                 val backend = ModelLoader.getOrCreateBackend(
                     context,
                     activePath,
-                    SingSettings.threadCount,
-                    SingSettings.hardwareTarget,
-                    targetModel
+                    threads,
+                    target,
+                    selectedModel
                 )
                 if (backend != null) {
-                    if (engine != null) {
-                        engine.updateBackend(backend)
-                    } else {
-                        val newEngine = AiStemSeparationEngine(backend)
-                        newEngine.preserveSide = SingSettings.preserveSide
-                        newEngine.twoWaySlider = SingSettings.twoWaySlider
-                        newEngine.ecoMode = SingSettings.ecoMode
-                        aiEngine = newEngine
+                    val engine = synchronized(this) {
+                        if (released || generation != initializationGeneration.get()) return@execute
+                        aiEngine.also {
+                            if (it == null || !it.usesBackend(backend)) isEngineReady = false
+                        }
                     }
-                    isEngineReady = true
+                    val changed = engine == null || !engine.usesBackend(backend)
+                    // Waiting for inference must not hold the playback monitor.
+                    engine?.updateBackend(backend)
+                    val backendChanged = synchronized(this) {
+                        if (released || generation != initializationGeneration.get()) return@execute
+                        if (engine == null) aiEngine = AiStemSeparationEngine(backend)
+                        if (changed) resetResampling()
+                        aiEngine?.apply {
+                            preserveSide = SingSettings.preserveSide
+                            twoWaySlider = SingSettings.twoWaySlider
+                            ecoMode = SingSettings.ecoMode
+                        }
+                        isEngineReady = true
+                        changed
+                    }
                     Log.i(TAG, "Neural Stem Separation Engine initialized (${ModelLoader.activeProviderName})")
-                    SingSettings.sendHeartbeat(context, managerInfo, ModelLoader.activeProviderShort)
+                    // A heartbeat causes a settings reply. Do not create a reply/heartbeat loop.
+                    if (backendChanged) SingSettings.sendHeartbeat(context, managerInfo, ModelLoader.activeProviderShort)
                     onEngineReadyListener?.invoke()
                 } else {
                     Log.w(TAG, "Backend initialization returned null")
@@ -250,11 +226,63 @@ class SingAudioProcessor(
         }
     }
 
+    private fun configureResampling(sampleRate: Int) {
+        if (sampleRate == currentSampleRate && downResampler != null && upResampler != null) return
+        downResampler?.close()
+        upResampler?.close()
+        downResampler = StereoResampler(sampleRate, 44100)
+        upResampler = StereoResampler(44100, sampleRate)
+        currentSampleRate = sampleRate
+    }
+
+    private fun resetResampling() {
+        downResampler?.close()
+        upResampler?.close()
+        downResampler = null
+        upResampler = null
+        currentSampleRate = -1
+        sourceFrames = 0L
+        outputFramesWritten = 0L
+        sourceEnded = false
+        outputResamplerDrained = false
+    }
+
+    private fun writePcmOutput(processorObj: Any, frames: Int, encoding: Int): Int {
+        // A round trip through two rational sample rates may produce a final extra
+        // frame. The source stream, not either resampler's rounded length, is authoritative.
+        val count = minOf(frames.toLong(), maxOf(0L, sourceFrames - outputFramesWritten)).toInt()
+        val bytes = count * 2 * getBytesPerSample(encoding)
+        val output = ReflectionUtils.callMethod(processorObj, "replaceOutputBuffer", bytes) as ByteBuffer
+        output.clear()
+        output.order(ByteOrder.LITTLE_ENDIAN)
+        if (count > 0) PcmOutput.write(output, outFloats, count * 2, encoding)
+        output.position(bytes)
+        output.flip()
+        outputFramesWritten += count
+        return count
+    }
+
+    private fun writeAvailableOutput(
+        processorObj: Any, engine: AiStemSeparationEngine, sampleRate: Int, encoding: Int, frames44k: Int
+    ): Int {
+        val outputCapacity = ((frames44k * sampleRate.toLong() + 44099) / 44100 + 2).toInt()
+        ensureCapacity(maxOf(65536, maxOf(frames44k, outputCapacity) * 2))
+        val produced = if (sampleRate == 44100) {
+            engine.popVocalAndBlend(outFloats, frames44k, smoothedLevel)
+        } else {
+            configureResampling(sampleRate)
+            val popped = engine.popVocalAndBlend(resampledOutFloats, frames44k, smoothedLevel)
+            upResampler!!.resample(resampledOutFloats, popped, outFloats)
+        }
+        return writePcmOutput(processorObj, produced, encoding)
+    }
+
     /**
      * Replaces VocalsAudioProcessor.queueInput(ByteBuffer inputBuffer).
-     * Runs synchronously on ExoPlayer's playback thread with < 0.1ms compute time,
+     * Runs synchronously on ExoPlayer's playback thread,
      * delegating heavy neural network computation to the background AI streaming engine.
      */
+    @Synchronized
     fun processQueueInput(processorObj: Any, inputBuffer: ByteBuffer) {
         if (!inputBuffer.hasRemaining()) {
             return
@@ -279,16 +307,23 @@ class SingAudioProcessor(
                 return
             }
 
-            // Sing is ON: ensure engine is activated
-            if (!engine.active) {
-                engine.activate()
-            }
-
             val inputFormat = ReflectionUtils.getObjectField(processorObj, "inputAudioFormat")
             val encoding = ReflectionUtils.getIntField(inputFormat, "encoding")
             val channelCount = ReflectionUtils.getIntField(inputFormat, "channelCount")
             val sampleRate = ReflectionUtils.getIntField(inputFormat, "sampleRate")
             val bytesPerSample = getBytesPerSample(encoding)
+
+            // This pipeline is stereo-only. Leave all other formats byte-for-byte intact.
+            if (channelCount != 2 || sampleRate !in 8000..384000 || !isSupportedEncoding(encoding)) {
+                engine.deactivate()
+                resetResampling()
+                passThrough(processorObj, inputBuffer)
+                return
+            }
+            if (!engine.active) {
+                engine.activate()
+                resetResampling()
+            }
 
             val remainingBytes = inputBuffer.remaining()
             val frameCount = remainingBytes / (channelCount * bytesPerSample)
@@ -297,11 +332,13 @@ class SingAudioProcessor(
                 return
             }
 
-            val framesToAdd = if (sampleRate == 44100) frameCount else ((frameCount * 44100L) / sampleRate).toInt()
+            val framesToAdd = if (sampleRate == 44100) frameCount else ((frameCount * 44100L + sampleRate - 1) / sampleRate).toInt() + 1
 
             val canAccept = engine.canAcceptInput(framesToAdd)
-            if (!canAccept && !engine.isReady) {
-                // Initial pre-roll: halt decoder without consuming inputBuffer while awaiting chunk 0
+            if (!canAccept) {
+                // Emit already-decoded output without accepting more input. The host retries
+                // this same input after consuming the output, avoiding a full-ring deadlock.
+                if (writeAvailableOutput(processorObj, engine, sampleRate, encoding, framesToAdd) > 0) return
                 engine.awaitProgress(20)
                 val outputBuf = ReflectionUtils.callMethod(
                     processorObj,
@@ -310,17 +347,6 @@ class SingAudioProcessor(
                 ) as ByteBuffer
                 outputBuf.position(0)
                 outputBuf.flip()
-                return
-            }
-
-            // Mono tracks are not supported by the stem engine: pass through
-            // untouched instead of feeding stale buffers to the output path.
-            if (channelCount < 2) {
-                passThrough(processorObj, inputBuffer)
-                try {
-                    ReflectionUtils.setFloatField(processorObj, "level", smoothedLevel)
-                    ReflectionUtils.setIntField(processorObj, "mode", 0)
-                } catch (t: Throwable) {}
                 return
             }
 
@@ -337,7 +363,7 @@ class SingAudioProcessor(
                 }
             }
 
-            // Decode incoming PCM bytes to normalized floats [-1.0, 1.0]
+            // Decode incoming PCM bytes to normalized floats [-1.0, 1.0].
             inputBuffer.order(ByteOrder.LITTLE_ENDIAN)
             when (encoding) {
                 ENCODING_PCM_16BIT -> {
@@ -369,82 +395,21 @@ class SingAudioProcessor(
                         inFloats[i] = intBuf.get() * factor
                     }
                 }
-                else -> {
-                    val shortBuf = inputBuffer.asShortBuffer()
-                    shortBuf.get(inShorts, 0, totalSamples)
-                    val factor = 1.0f / 32768.0f
-                    for (i in 0 until totalSamples) {
-                        inFloats[i] = inShorts[i] * factor
-                    }
-                }
             }
             inputBuffer.position(inputBuffer.limit())
+            sourceFrames += frameCount
 
-            // Push incoming audio frames to the engine.
-            // Never discard or drop input frames - dropping input frames creates temporal discontinuities (pops/clicks).
-            if (channelCount >= 2) {
-                if (sampleRate == 44100) {
-                    engine.pushInput(inFloats, frameCount)
-                } else {
-                    if (sampleRate != currentSampleRate || downResampler == null) {
-                        currentSampleRate = sampleRate
-                        downResampler?.close()
-                        upResampler?.close()
-                        downResampler = StereoResampler(sampleRate, 44100)
-                        upResampler = StereoResampler(44100, sampleRate)
-                    }
-                    val frames44k = downResampler!!.resample(inFloats, frameCount, resampledInFloats)
-                    engine.pushInput(resampledInFloats, frames44k)
-                }
-            }
-
-            if (channelCount >= 2) {
-                val outputFrames: Int
-
-                if (sampleRate == 44100) {
-                    outputFrames = engine.popVocalAndBlend(outFloats, frameCount, smoothedLevel)
-                } else {
-                    if (sampleRate != currentSampleRate || upResampler == null) {
-                        currentSampleRate = sampleRate
-                        downResampler?.close()
-                        upResampler?.close()
-                        downResampler = StereoResampler(sampleRate, 44100)
-                        upResampler = StereoResampler(44100, sampleRate)
-                    }
-                    val frames44k = if (sampleRate > 0) ((frameCount * 44100L) / sampleRate).toInt() else frameCount
-                    val popped44k = engine.popVocalAndBlend(resampledOutFloats, frames44k, smoothedLevel)
-                    outputFrames = upResampler!!.resample(resampledOutFloats, popped44k, outFloats)
-                }
-
-                val outputBytes = outputFrames * channelCount * bytesPerSample
-                val outputBuf = ReflectionUtils.callMethod(
-                    processorObj,
-                    "replaceOutputBuffer",
-                    outputBytes
-                ) as ByteBuffer
-
-                outputBuf.clear()
-                outputBuf.order(ByteOrder.LITTLE_ENDIAN)
-                if (outputBytes > 0) {
-                    PcmOutput.write(outputBuf, outFloats, outputFrames * channelCount, encoding)
-                }
-                outputBuf.position(outputBytes)
-                outputBuf.flip()
+            val frames44k = if (sampleRate == 44100) {
+                engine.pushInput(inFloats, frameCount)
+                frameCount
             } else {
-                // Fallback pass-through for mono tracks
-                val outputBytes = totalSamples * bytesPerSample
-                val outputBuf = ReflectionUtils.callMethod(
-                    processorObj,
-                    "replaceOutputBuffer",
-                    outputBytes
-                ) as ByteBuffer
-
-                outputBuf.clear()
-                outputBuf.order(ByteOrder.LITTLE_ENDIAN)
-                PcmOutput.write(outputBuf, inFloats, totalSamples, encoding)
-                outputBuf.position(outputBytes)
-                outputBuf.flip()
+                configureResampling(sampleRate)
+                val produced = downResampler!!.resample(inFloats, frameCount, resampledInFloats)
+                engine.pushInput(resampledInFloats, produced)
+                produced
             }
+            // Use the actual resampler count, never independently round each buffer.
+            writeAvailableOutput(processorObj, engine, sampleRate, encoding, frames44k)
 
             // Update VocalsAudioProcessor internal fields
             try {
@@ -460,10 +425,10 @@ class SingAudioProcessor(
     /**
      * Reset state on track seeks or audio flushes.
      */
+    @Synchronized
     fun reset() {
         aiEngine?.reset()
-        downResampler?.reset()
-        upResampler?.reset()
+        resetResampling()
         java.util.Arrays.fill(inFloats, 0.0f)
         java.util.Arrays.fill(outFloats, 0.0f)
         java.util.Arrays.fill(inShorts, 0.toShort())
@@ -472,12 +437,23 @@ class SingAudioProcessor(
         smoothedLevel = vocalLevel
     }
 
+    @Synchronized
     fun onEndOfStream() {
+        if (sourceEnded) return
+        sourceEnded = true
+        val engine = aiEngine
+        if (isEnabled && engine?.active == true && currentSampleRate != 44100) {
+            val tail = downResampler?.finish(resampledInFloats) ?: 0
+            if (tail > 0) engine.pushInput(resampledInFloats, tail)
+        }
         aiEngine?.onEndOfStream()
     }
 
+    @Synchronized
     fun isEnded(): Boolean {
-        return aiEngine?.isEnded() ?: true
+        val engine = aiEngine ?: return true
+        if (!isEnabled || !engine.active) return true
+        return engine.isEnded() && (upResampler == null || outputResamplerDrained)
     }
 
     val needsBurst: Boolean
@@ -511,6 +487,7 @@ class SingAudioProcessor(
      * Called by VocalsAudioProcessor.getOutput() hook at end of stream
      * to drain the trailing audio frames so songs don't end prematurely.
      */
+    @Synchronized
     fun drainPendingOutput(processorObj: Any): ByteBuffer? {
         val engine = aiEngine ?: return null
         if (!isEnabled || !engine.active || !engine.isEndOfStream) return null
@@ -524,43 +501,26 @@ class SingAudioProcessor(
         val sampleRate = ReflectionUtils.getIntField(inputFormat, "sampleRate")
         val encoding = ReflectionUtils.getIntField(inputFormat, "encoding")
 
-        if (channelCount < 2) return null
-        if (!engine.hasPendingOutput) return null
+        if (channelCount != 2) return null
 
         val available44k = engine.availableVocalFrames
-        if (available44k <= 0L) return null
-
-        val drainFrames44k = minOf(2048L, available44k).toInt()
-        ensureCapacity(maxOf(65536, drainFrames44k * 8))
-
-        val outputFrames: Int
-        if (sampleRate == 44100) {
-            outputFrames = engine.popVocalAndBlend(outFloats, drainFrames44k, smoothedLevel)
-        } else {
-            val popped44k = engine.popVocalAndBlend(resampledOutFloats, drainFrames44k, smoothedLevel)
-            if (popped44k == 0) return null
-            outputFrames = upResampler?.resample(resampledOutFloats, popped44k, outFloats) ?: 0
-        }
-
-        if (outputFrames <= 0) return null
-
-        val outputBytes = outputFrames * channelCount * getBytesPerSample(encoding)
-        val outputBuf = ReflectionUtils.callMethod(
-            processorObj,
-            "replaceOutputBuffer",
-            outputBytes
-        ) as ByteBuffer
-
-        outputBuf.clear()
-        outputBuf.order(ByteOrder.LITTLE_ENDIAN)
-        PcmOutput.write(outputBuf, outFloats, outputFrames * channelCount, encoding)
-        outputBuf.position(outputBytes)
-        outputBuf.flip()
-        return outputBuf
+        val written = if (available44k > 0L) {
+            writeAvailableOutput(processorObj, engine, sampleRate, encoding, minOf(2048L, available44k).toInt())
+        } else if (engine.isEnded() && sampleRate != 44100 && !outputResamplerDrained) {
+            val tail = upResampler?.finish(outFloats) ?: 0
+            outputResamplerDrained = true
+            writePcmOutput(processorObj, tail, encoding)
+        } else 0
+        return if (written > 0) ReflectionUtils.getObjectField(processorObj, "outputBuffer") as? ByteBuffer else null
     }
 
+    @Synchronized
     fun release() {
+        if (released) return
+        released = true
+        initializationGeneration.incrementAndGet()
         aiEngine?.release()
+        aiEngine = null
         downResampler?.close()
         upResampler?.close()
         downResampler = null

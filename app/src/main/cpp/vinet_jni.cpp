@@ -77,9 +77,9 @@ Java_org_francasio_sing_audio_backend_NativeInferenceBackend_nativeCreate(
   }
 
   const bool ok = h->v.load(path);
+  if (!ok) VERR("failed to load plan: %s", path);
   env->ReleaseStringUTFChars(jpath, path);
   if (!ok) {
-    VERR("failed to load plan: %s", path);
     delete h;
     return 0;
   }

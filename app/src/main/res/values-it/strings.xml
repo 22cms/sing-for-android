@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <string name="benchmark_processing_new_audio">%1$d ms (nuovo audio: %2$.0f ms)</string>
     <string name="whats_new_heading">Novità di Sing for Android</string>
     <string name="whats_new_version">Versione %1$s</string>
     <string name="whats_new_minor_changes">Cambiamenti minori</string>

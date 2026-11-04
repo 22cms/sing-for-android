@@ -331,7 +331,7 @@ class AudioPipelineHooks(
                 hookMethod(m) { chain ->
                     val processor = audioProcessor
                     if (processor != null && processor.isEnabled) {
-                        processor.isEnded()
+                        chain.proceed() == true && processor.isEnded()
                     } else {
                         chain.proceed()
                     }
@@ -360,7 +360,6 @@ class AudioPipelineHooks(
                     val mode = chain.getArg(0) as Int
                     val enabled = (mode == 1)
                     val processor = audioProcessor
-                    val wasSingActive = (processor?.isEnabled == true)
                     if (processor != null) {
                         processor.isEnabled = enabled
                     }

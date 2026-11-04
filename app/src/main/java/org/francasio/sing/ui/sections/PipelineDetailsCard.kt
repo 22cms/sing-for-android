@@ -261,7 +261,11 @@ fun PipelineDetailsCard(
                 )
                 PipelineSpecRow(
                     label = stringResource(id = R.string.label_audio_pipeline),
-                    value = if (currentModel?.isTimeDomain == true) "Time-Domain Frame Pacing (4096) ➔ NN" else "KissFFT STFT (6144) ➔ NN ➔ iSTFT"
+                    value = when {
+                        currentModel?.isTimeDomain == true -> "Time-Domain Frame Pacing (${currentModel.blockSize}) ➔ NN"
+                        currentModel?.isVr3Band == true -> "3-band KissFFT STFT (768) ➔ NN ➔ iSTFT"
+                        else -> "KissFFT STFT (${currentModel?.fftSize ?: 6144}) ➔ NN ➔ iSTFT"
+                    }
                 )
                 PipelineSpecRow(
                     label = stringResource(id = R.string.label_audio_format),
@@ -269,10 +273,15 @@ fun PipelineDetailsCard(
                 )
 
                 benchmarkState.result?.let { result ->
-                    val isTimeDomain = currentModel?.isTimeDomain == true
+                    val resultModel = ModelLoader.findCatalogModel(result.modelId) ?: currentModel
+                    val isTimeDomain = resultModel?.isTimeDomain == true
                     PipelineSpecRow(
                         label = stringResource(id = R.string.label_chunk_latency),
-                        value = if (isTimeDomain) "${result.totalMs} ms (Audio: ~93 ms)" else "${result.totalMs} ms (Audio: 5,921 ms)"
+                        value = stringResource(
+                            R.string.benchmark_processing_new_audio,
+                            result.totalMs,
+                            result.audioFramesPerRun * 1000.0 / 44100.0
+                        )
                     )
                     PipelineSpecRow(
                         label = stringResource(id = R.string.label_breakdown),
@@ -283,4 +292,3 @@ fun PipelineDetailsCard(
         }
     }
 }
-

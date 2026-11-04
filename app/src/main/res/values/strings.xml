@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <string name="benchmark_processing_new_audio">%1$d ms (new audio: %2$.0f ms)</string>
     <string name="app_name" translatable="false">Sing for Android</string>
     <string name="xposed_description" translatable="false">A reimplementation of Apple Music Sing mode for Android with HW accelerated stem separation.</string>
     <string name="open_apple_music">Launch Apple Music</string>

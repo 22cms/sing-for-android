@@ -241,9 +241,17 @@ object ModelLoader {
 
     fun loadSelectedModel(context: Context): ModelInfo? {
         val file = File(context.filesDir, SELECTED_MODEL_FILE)
-        if (!file.exists() || file.length() == 0L) return null
         return try {
-            val str = file.readText()
+            if (!file.exists() || file.length() == 0L) null
+            else registerSelectedModelJson(file.readText())
+        } catch (t: Throwable) {
+            Log.w(TAG, "Failed reading selected model JSON: ${t.message}")
+            null
+        }
+    }
+
+    fun registerSelectedModelJson(str: String): ModelInfo? {
+        return try {
             val obj = JSONObject(str)
             val id = obj.optString("id", "")
             val catalogModel = findCatalogModel(id)
@@ -696,8 +704,6 @@ object ModelLoader {
     private var currentThreadCount: Int = -1
     var currentTarget: String = SingSettings.TARGET_NPU
         private set
-    var currentForceCpu: Boolean = false
-        private set
     var currentModelId: String = ""
         private set
 
@@ -725,7 +731,6 @@ object ModelLoader {
             Log.w(TAG, "Cannot create backend: model '$modelId' not found in catalog")
             return null
         }
-        val forceCpu = (hardwareTarget == SingSettings.TARGET_CPU)
 
         val cachedBackend = currentBackend
         if (cachedBackend != null &&
@@ -790,7 +795,6 @@ object ModelLoader {
             currentBackend = backend
             currentThreadCount = targetThreads
             currentTarget = hardwareTarget
-            currentForceCpu = forceCpu
             currentModelId = modelInfo.id
 
             if (oldBackend != null && oldBackend !== backend) {
@@ -821,6 +825,7 @@ object ModelLoader {
     }
 
     fun getCandidateModelFiles(context: Context, fileName: String): List<File> {
+        require(org.francasio.sing.provider.SettingsValidation.isModelFileName(fileName)) { "Invalid model filename" }
         return listOf(
             File(File(context.filesDir, "models"), fileName),
             File("/sdcard/Download/sing_models", fileName),
@@ -832,6 +837,7 @@ object ModelLoader {
     }
 
     private fun ensureModelExtracted(context: Context, moduleApkPath: String, fileName: String): File {
+        require(org.francasio.sing.provider.SettingsValidation.isModelFileName(fileName)) { "Invalid model filename" }
         val targetFile = File(context.cacheDir, fileName)
         if (targetFile.exists() && targetFile.length() > 1024 * 1024) {
             return targetFile

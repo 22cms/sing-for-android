@@ -71,14 +71,11 @@ class OnnxInferenceBackend(
     private val inAudioShortBuffer: ShortBuffer?
 
     private val numStates: Int
-    private val stateShapes: Array<LongArray>
-    private val stateTypes: Array<OnnxJavaType>
     private val stateBuffersA: Array<Buffer>?
     private val stateBuffersB: Array<Buffer>?
     private val stateTensorsA: Array<OnnxTensor>?
     private val stateTensorsB: Array<OnnxTensor>?
     private var pingPong = 0
-    private var supportsOutputMap = true
 
     init {
         if (modelInfo.isTimeDomain) {
@@ -117,8 +114,6 @@ class OnnxInferenceBackend(
                     val info = session.inputInfo[stateInNamesList[i]]?.info as? ai.onnxruntime.TensorInfo
                     info?.type ?: OnnxJavaType.FLOAT16
                 }
-                stateShapes = shapes
-                stateTypes = types
 
                 stateBuffersA = Array(numStates) { i ->
                     val elemCount = shapes[i].fold(1L) { acc, d -> acc * if (d > 0) d else 1L }.toInt()
@@ -148,8 +143,6 @@ class OnnxInferenceBackend(
                     }
                 }
             } else {
-                stateShapes = emptyArray()
-                stateTypes = emptyArray()
                 stateBuffersA = null
                 stateBuffersB = null
                 stateTensorsA = null
@@ -163,8 +156,6 @@ class OnnxInferenceBackend(
             inAudioFloatBuffer = null
             inAudioShortBuffer = null
             numStates = 0
-            stateShapes = emptyArray()
-            stateTypes = emptyArray()
             stateBuffersA = null
             stateBuffersB = null
             stateTensorsA = null
