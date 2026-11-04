@@ -569,10 +569,10 @@ class SingAudioProcessor(
     }
 
     /**
-     * Audiophile-grade bandlimited Blackman-windowed sinc resampler with continuous phase preservation across buffer boundaries.
+     * Stateful SpeexDSP stereo resampler (quality 8), including explicit EOS draining.
      */
     class StereoResampler(fromRate: Int, toRate: Int) : AutoCloseable {
-        private val nativeResampler = StftEngine.NativeSincResampler(fromRate, toRate)
+        private val nativeResampler = StftEngine.NativeSpeexResampler(fromRate, toRate)
 
         fun reset() {
             nativeResampler.reset()
@@ -581,6 +581,8 @@ class SingAudioProcessor(
         fun resample(inFloats: FloatArray, inFrames: Int, outFloats: FloatArray): Int {
             return nativeResampler.resample(inFloats, inFrames, outFloats)
         }
+
+        fun finish(outFloats: FloatArray): Int = nativeResampler.finish(outFloats)
 
         override fun close() {
             nativeResampler.close()

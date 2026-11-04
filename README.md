@@ -70,12 +70,14 @@
 
 ### 1. Clone with Submodules
 
-This project uses [KissFFT](https://github.com/mborgerding/kissfft) as a submodule in `extern/kissfft`. 
+This project uses [KissFFT](https://github.com/mborgerding/kissfft) and
+[SpeexDSP](https://github.com/xiph/speexdsp) as submodules in `extern/`.
 
 ```bash
 # Clone the repository recursively
 git clone --recursive https://github.com/22cms/sing-for-android.git
 cd sing-for-android
+```
 
 ### 2. Build libMNN with Hexagon HTP NPU & Vulkan
 
@@ -108,6 +110,7 @@ The resulting APK will be located under `app/build/outputs/apk/`.
 - **[Alibaba MNN](https://github.com/alibaba/MNN)**: Lightweight cross-platform deep learning inference engine for mobile GPUs and NPUs.
 - **[MDX-Net / Ultimate Vocal Remover](https://github.com/Anjok07/ultimatevocalremovergui)**: State-of-the-art vocal isolation architectures by Roman Solovyev et al. (Kuielab).
 - **[KissFFT](https://github.com/mborgerding/kissfft)**: Fast Fourier Transform library by Mark Borgerding.
+- **[SpeexDSP](https://github.com/xiph/speexdsp)**: Streaming sample-rate conversion (BSD license).
 - **[Vector](https://github.com/JingMatrix/Vector) / [LSPatch](https://github.com/JingMatrix/LSPatch)**: Modern ART hooking framework and patcher.
 - **[Apple SF Symbols](https://developer.apple.com/sf-symbols/)**: Iconography reference.
 

@@ -1,3 +1,6 @@
 [submodule "extern/kissfft"]
 	path = extern/kissfft
 	url = https://github.com/mborgerding/kissfft.git
+[submodule "extern/speexdsp"]
+	path = extern/speexdsp
+	url = https://github.com/xiph/speexdsp.git

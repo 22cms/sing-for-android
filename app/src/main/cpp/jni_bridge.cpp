@@ -2,7 +2,9 @@
 #include <string>
 #include <vector>
 #include "stft_engine.h"
-#include "sinc_resampler.h"
+#include "stereo_resampler.h"
+#include <exception>
+#include <stdexcept>
 #include "vr_dsp_engine.h"
 
 extern "C" {
@@ -88,21 +90,44 @@ Java_org_francasio_sing_audio_StftEngine_nativeCenterCutPcm(
 
 JNIEXPORT jlong JNICALL
 Java_org_francasio_sing_audio_StftEngine_nativeResamplerCreate(
-        JNIEnv* /*env*/, jclass /*clazz*/, jint fromRate, jint toRate) {
-    auto* resampler = new sing::SincResampler(fromRate, toRate);
-    return reinterpret_cast<jlong>(resampler);
+        JNIEnv* env, jclass /*clazz*/, jint fromRate, jint toRate) {
+    try {
+        return reinterpret_cast<jlong>(new sing::StereoResampler(fromRate, toRate));
+    } catch (const std::exception& e) {
+        env->ThrowNew(env->FindClass("java/lang/IllegalArgumentException"), e.what());
+        return 0;
+    }
 }
 
 JNIEXPORT jint JNICALL
 Java_org_francasio_sing_audio_StftEngine_nativeResamplerProcess(
         JNIEnv* env, jclass /*clazz*/, jlong handle, jfloatArray inPcm, jint inFrames, jfloatArray outPcm) {
-    auto* resampler = reinterpret_cast<sing::SincResampler*>(handle);
-    if (!resampler || inFrames <= 0) return 0;
+    auto* resampler = reinterpret_cast<sing::StereoResampler*>(handle);
+    if (!resampler || !inPcm || !outPcm) return 0;
+    const int capacity = env->GetArrayLength(outPcm) / 2;
+    try {
+        if (inFrames < 0 || inFrames > env->GetArrayLength(inPcm) / 2 ||
+            capacity < resampler->maxOutputFrames(inFrames))
+            throw std::invalid_argument("Invalid resampler buffer size");
+    } catch (const std::exception& e) {
+        env->ThrowNew(env->FindClass("java/lang/IllegalArgumentException"), e.what());
+        return 0;
+    }
 
     jfloat* in_ptr = env->GetFloatArrayElements(inPcm, nullptr);
+    if (!in_ptr) return 0;
     jfloat* out_ptr = env->GetFloatArrayElements(outPcm, nullptr);
+    if (!out_ptr) {
+        env->ReleaseFloatArrayElements(inPcm, in_ptr, JNI_ABORT);
+        return 0;
+    }
 
-    int out_frames = resampler->resample(in_ptr, inFrames, out_ptr);
+    int out_frames = 0;
+    try {
+        out_frames = resampler->resample(in_ptr, inFrames, out_ptr, capacity);
+    } catch (const std::exception& e) {
+        env->ThrowNew(env->FindClass("java/lang/IllegalStateException"), e.what());
+    }
 
     env->ReleaseFloatArrayElements(inPcm, in_ptr, JNI_ABORT);
     env->ReleaseFloatArrayElements(outPcm, out_ptr, 0);
@@ -110,10 +135,27 @@ Java_org_francasio_sing_audio_StftEngine_nativeResamplerProcess(
     return out_frames;
 }
 
+JNIEXPORT jint JNICALL
+Java_org_francasio_sing_audio_StftEngine_nativeResamplerFinish(
+        JNIEnv* env, jclass, jlong handle, jfloatArray outPcm) {
+    auto* resampler = reinterpret_cast<sing::StereoResampler*>(handle);
+    if (!resampler || !outPcm) return 0;
+    jfloat* output = env->GetFloatArrayElements(outPcm, nullptr);
+    if (!output) return 0;
+    int written = 0;
+    try {
+        written = resampler->finish(output, env->GetArrayLength(outPcm) / 2);
+    } catch (const std::exception& e) {
+        env->ThrowNew(env->FindClass("java/lang/IllegalStateException"), e.what());
+    }
+    env->ReleaseFloatArrayElements(outPcm, output, 0);
+    return written;
+}
+
 JNIEXPORT void JNICALL
 Java_org_francasio_sing_audio_StftEngine_nativeResamplerReset(
         JNIEnv* /*env*/, jclass /*clazz*/, jlong handle) {
-    auto* resampler = reinterpret_cast<sing::SincResampler*>(handle);
+    auto* resampler = reinterpret_cast<sing::StereoResampler*>(handle);
     if (resampler) {
         resampler->reset();
     }
@@ -122,7 +164,7 @@ Java_org_francasio_sing_audio_StftEngine_nativeResamplerReset(
 JNIEXPORT void JNICALL
 Java_org_francasio_sing_audio_StftEngine_nativeResamplerDestroy(
         JNIEnv* /*env*/, jclass /*clazz*/, jlong handle) {
-    auto* resampler = reinterpret_cast<sing::SincResampler*>(handle);
+    auto* resampler = reinterpret_cast<sing::StereoResampler*>(handle);
     delete resampler;
 }
 

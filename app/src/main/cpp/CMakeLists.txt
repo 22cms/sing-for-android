@@ -28,9 +28,17 @@ set(KISSFFT_TOOLS OFF CACHE BOOL "" FORCE)
 set(KISSFFT_PKGCONFIG OFF CACHE BOOL "" FORCE)
 add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/../../../../extern/kissfft ${CMAKE_CURRENT_BINARY_DIR}/kissfft EXCLUDE_FROM_ALL)
 
+# Compile only SpeexDSP's resampler, not its echo cancellation/codec utilities.
+set(SPEEXDSP_ROOT ${CMAKE_CURRENT_SOURCE_DIR}/../../../../extern/speexdsp)
+add_library(sing_speex_resampler STATIC ${SPEEXDSP_ROOT}/libspeexdsp/resample.c)
+set_target_properties(sing_speex_resampler PROPERTIES POSITION_INDEPENDENT_CODE ON)
+target_include_directories(sing_speex_resampler PUBLIC ${SPEEXDSP_ROOT}/include/speex)
+target_compile_definitions(sing_speex_resampler PUBLIC OUTSIDE_SPEEX RANDOM_PREFIX=sing_speex)
+target_compile_definitions(sing_speex_resampler PRIVATE FLOATING_POINT)
+
 add_library(sing_dsp SHARED
     stft_engine.cpp
-    sinc_resampler.cpp
+    speex_resampler.cpp
     vr_dsp_engine.cpp
     jni_bridge.cpp
     vinet_jni.cpp
@@ -55,6 +63,7 @@ endif()
 
 target_link_libraries(sing_dsp
     kissfft
+    sing_speex_resampler
     ${log-lib}
     dl
 )
@@ -68,4 +77,3 @@ target_link_options(dl_android_stub PRIVATE
     "-Wl,-soname,libdl_android.so"
     "-Wl,--version-script=${CMAKE_CURRENT_SOURCE_DIR}/libdl_android_stub.map"
 )
-

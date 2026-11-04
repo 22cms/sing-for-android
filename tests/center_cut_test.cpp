@@ -41,9 +41,9 @@ int main() {
     // The time-domain path uses one block of context on either side. Check
     // that the quadrature copy does not reset at a block boundary.
     constexpr int pad = 1024;
-    std::vector<float> waveform(3 * frames * 2), context((frames + 2 * pad) * 2);
+    std::vector<float> waveform((3 * frames + pad) * 2), context((frames + 2 * pad) * 2);
     std::vector<float> processed(context.size());
-    for (int frame = 0; frame < 3 * frames; ++frame) {
+    for (int frame = 0; frame < 3 * frames + pad; ++frame) {
         const float s = 0.4f * std::sin(2.0 * 3.141592653589793 * 430 * frame / 44100);
         waveform[2 * frame] = s;
         waveform[2 * frame + 1] = -s;

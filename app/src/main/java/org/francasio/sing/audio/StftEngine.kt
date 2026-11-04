@@ -58,17 +58,20 @@ class StftEngine : AutoCloseable {
         external fun nativeResamplerProcess(handle: Long, inPcm: FloatArray, inFrames: Int, outPcm: FloatArray): Int
 
         @JvmStatic
+        external fun nativeResamplerFinish(handle: Long, outPcm: FloatArray): Int
+
+        @JvmStatic
         external fun nativeResamplerReset(handle: Long)
 
         @JvmStatic
         external fun nativeResamplerDestroy(handle: Long)
     }
 
-    class NativeSincResampler(fromRate: Int, toRate: Int) : AutoCloseable {
+    class NativeSpeexResampler(fromRate: Int, toRate: Int) : AutoCloseable {
         private var handle: Long = nativeResamplerCreate(fromRate, toRate)
 
         fun resample(inFloats: FloatArray, inFrames: Int, outFloats: FloatArray): Int {
-            check(handle != 0L) { "NativeSincResampler is closed" }
+            check(handle != 0L) { "NativeSpeexResampler is closed" }
             return nativeResamplerProcess(handle, inFloats, inFrames, outFloats)
         }
 
@@ -76,6 +79,11 @@ class StftEngine : AutoCloseable {
             if (handle != 0L) {
                 nativeResamplerReset(handle)
             }
+        }
+
+        fun finish(outFloats: FloatArray): Int {
+            check(handle != 0L) { "NativeSpeexResampler is closed" }
+            return nativeResamplerFinish(handle, outFloats)
         }
 
         override fun close() {
