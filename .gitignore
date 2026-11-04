@@ -12,6 +12,7 @@ release/
 *.keystore
 
 # Local configuration
+/.vscode/
 local.properties
 keystore.properties
 .gradle/
