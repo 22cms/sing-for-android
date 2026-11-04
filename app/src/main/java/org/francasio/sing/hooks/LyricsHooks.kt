@@ -132,14 +132,10 @@ class LyricsHooks(
                         if (vocalCtrl != null) {
                             if (eligible) {
                                 vocalCtrl.visibility = View.VISIBLE
-                                if (!isReady) {
-                                    org.francasio.sing.SingXposedEntry.startLoadingBlink(vocalCtrl)
-                                    mainHandler.postDelayed({
-                                        logInfo("POST-D2: vis=${vocalCtrl.visibility} alpha=${vocalCtrl.alpha} parentVis=${(vocalCtrl.parent as? View)?.visibility}")
-                                    }, 300L)
-                                } else {
-                                    org.francasio.sing.SingXposedEntry.stopLoadingBlink(vocalCtrl)
-                                }
+                                org.francasio.sing.SingXposedEntry.updateVocalButtonState(vocalCtrl)
+                                mainHandler.postDelayed({
+                                    logInfo("POST-D2: vis=${vocalCtrl.visibility} alpha=${vocalCtrl.alpha} parentVis=${(vocalCtrl.parent as? View)?.visibility}")
+                                }, 300L)
                             } else {
                                 org.francasio.sing.SingXposedEntry.stopLoadingBlink(vocalCtrl)
                                 vocalCtrl.visibility = View.GONE
@@ -203,14 +199,11 @@ class LyricsHooks(
                                     currentVocalCtrl = WeakReference(vocalCtrl)
                                     updateVocalAttenuationFloor(vocalCtrl.javaClass)
                                     val isReady = audioProcessor?.isEngineReady == true
-                                    if (org.francasio.sing.provider.SingSettings.forceSongEligibility || !isReady) {
+                                    val hasModels = org.francasio.sing.provider.SingSettings.hasDownloadedModels || isReady
+                                    if (org.francasio.sing.provider.SingSettings.forceSongEligibility || !isReady || !hasModels) {
                                         vocalCtrl.visibility = View.VISIBLE
-                                        if (!isReady) {
-                                            org.francasio.sing.SingXposedEntry.startLoadingBlink(vocalCtrl)
-                                        } else {
-                                            org.francasio.sing.SingXposedEntry.stopLoadingBlink(vocalCtrl)
-                                        }
-                                        logInfo("Forced vocal_ctrl visibility to VISIBLE in onCreateView (isReady=$isReady)")
+                                        org.francasio.sing.SingXposedEntry.updateVocalButtonState(vocalCtrl)
+                                        logInfo("Forced vocal_ctrl visibility to VISIBLE in onCreateView (isReady=$isReady, hasModels=$hasModels)")
                                     } else {
                                         vocalCtrl.visibility = View.GONE
                                         org.francasio.sing.SingXposedEntry.stopLoadingBlink(vocalCtrl)

@@ -165,7 +165,7 @@ class SingAudioProcessor(
                     val old = synchronized(this) {
                         aiEngine.also {
                             aiEngine = null
-                            isEngineReady = true
+                            isEngineReady = false
                         }
                     }
                     old?.release()

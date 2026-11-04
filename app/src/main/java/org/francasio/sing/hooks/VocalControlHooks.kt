@@ -91,7 +91,7 @@ class VocalControlHooks(
                     val enabled = mode == 1
                     val processor = audioProcessor()
                     val wasSingActive = processor?.isEnabled == true
-                    val currentPosition = if (wasSingActive && !enabled) {
+                    val positionBeforeDisable = if (wasSingActive && !enabled) {
                         try {
                             ReflectionUtils.callMethod(controller, "getCurrentPosition") as? Long ?: -1L
                         } catch (_: Throwable) { -1L }
@@ -100,30 +100,19 @@ class VocalControlHooks(
 
                     processor?.isEnabled = enabled
                     onSingModeChanged(enabled)
-                    logInfo("LocalMediaPlayerController.setVocalAttenuationMode: mode=$mode (enabled=$enabled, wasSingActive=$wasSingActive, pos=$currentPosition ms, cushion=$cushionMs ms)")
+                    logInfo("LocalMediaPlayerController.setVocalAttenuationMode: mode=$mode (enabled=$enabled, pos=$positionBeforeDisable ms, cushion=$cushionMs ms)")
                     val result = chain.proceed()
 
-                    if (wasSingActive && !enabled && currentPosition >= 0L && cushionMs > 240L) {
-                        val delayMs = cushionMs - 240L
-                        mainHandler.postDelayed({
-                            try {
-                                val activeController = currentPlayerController?.get() ?: controller
-                                val nowPosition = try {
-                                    ReflectionUtils.callMethod(activeController, "getCurrentPosition") as? Long
-                                        ?: currentPosition
-                                } catch (_: Throwable) { currentPosition }
-                                val targetMs = if (nowPosition >= currentPosition + delayMs / 2) {
-                                    maxOf(0L, nowPosition - delayMs)
-                                } else {
-                                    maxOf(0L, currentPosition - 300L)
-                                }
-                                logInfo("Sing disabled: nowPos=$nowPosition ms, currentPos=$currentPosition ms, delayMs=$delayMs ms -> targetMs=$targetMs ms")
-                                ReflectionUtils.callMethod(activeController, "seekToPosition", targetMs)
-                                logInfo("Triggered controller.seekToPosition($targetMs ms) to restore sync on Sing disable")
-                            } catch (t: Throwable) {
-                                logError("Failed to invoke seekToPosition after Sing disable", t)
-                            }
-                        }, 120L)
+                    // Sing's inference path can have seconds of decoded-ahead audio. Do not
+                    // wait for that cushion to drain: switch to PCM bypass immediately, then
+                    // seek back to the position captured at toggle time to keep lyrics aligned.
+                    if (wasSingActive && !enabled && positionBeforeDisable >= 0L && cushionMs > 240L) {
+                        try {
+                            ReflectionUtils.callMethod(controller, "seekToPosition", positionBeforeDisable)
+                            logInfo("Sing disabled: immediately sought back to ${positionBeforeDisable} ms to restore audio/lyrics sync")
+                        } catch (t: Throwable) {
+                            logError("Failed to invoke seekToPosition after Sing disable", t)
+                        }
                     }
                     result
                 }
@@ -202,6 +191,7 @@ class VocalControlHooks(
     ) {
         var isLongPressed = false
         var isRightClickActive = false
+        var isMoved = false
         var downX = 0f
         var downY = 0f
         var longPressRunnable: Runnable? = null
@@ -233,31 +223,6 @@ class VocalControlHooks(
                     MotionEvent.ACTION_MOVE -> return@hookMethod true
                     MotionEvent.ACTION_UP, MotionEvent.ACTION_BUTTON_RELEASE, MotionEvent.ACTION_CANCEL -> {
                         isRightClickActive = false
-                        return@hookMethod true
-                    }
-                }
-            }
-
-            val isReady = audioProcessor()?.isEngineReady == true
-            if (!isReady && !isSingOn(vocalCtrl)) {
-                when (event.actionMasked) {
-                    MotionEvent.ACTION_DOWN -> {
-                        // Keep long-press / right-click settings launch working
-                        // while the engine is still loading.
-                    }
-                    MotionEvent.ACTION_MOVE -> {
-                        val slop = ViewConfiguration.get(vocalCtrl.context).scaledTouchSlop
-                        if (kotlin.math.abs(event.x - downX) > slop || kotlin.math.abs(event.y - downY) > slop) {
-                            longPressRunnable?.let { mainHandler.removeCallbacks(it) }
-                            longPressRunnable = null
-                        }
-                        return@hookMethod true
-                    }
-                    MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
-                        longPressRunnable?.let { mainHandler.removeCallbacks(it) }
-                        longPressRunnable = null
-                        // Ignore taps to enable sing while engine is loading
-                        logInfo("Ignoring tap on VocalAttenuationControl: engine is not ready yet")
                         return@hookMethod true
                     }
                 }
@@ -295,9 +260,14 @@ class VocalControlHooks(
                 return@hookMethod chain.proceed()
             }
 
+            // Sing is OFF:
+            val isReady = audioProcessor()?.isEngineReady == true
+            val hasModels = SingSettings.hasDownloadedModels || isReady
+
             when (event.actionMasked) {
                 MotionEvent.ACTION_DOWN -> {
                     isLongPressed = false
+                    isMoved = false
                     downX = event.x
                     downY = event.y
                     longPressRunnable?.let { mainHandler.removeCallbacks(it) }
@@ -314,14 +284,17 @@ class VocalControlHooks(
                     }
                     longPressRunnable = runnable
                     mainHandler.postDelayed(runnable, ViewConfiguration.getLongPressTimeout().toLong())
+                    return@hookMethod chain.proceed()
                 }
                 MotionEvent.ACTION_MOVE -> {
                     val slop = ViewConfiguration.get(vocalCtrl.context).scaledTouchSlop
                     if (kotlin.math.abs(event.x - downX) > slop || kotlin.math.abs(event.y - downY) > slop) {
+                        isMoved = true
                         longPressRunnable?.let { mainHandler.removeCallbacks(it) }
                         longPressRunnable = null
                     }
                     if (isLongPressed) return@hookMethod true
+                    if (!hasModels || !isReady) return@hookMethod true
                 }
                 MotionEvent.ACTION_UP -> {
                     longPressRunnable?.let { mainHandler.removeCallbacks(it) }
@@ -330,11 +303,43 @@ class VocalControlHooks(
                         isLongPressed = false
                         return@hookMethod true
                     }
+                    if (isMoved) {
+                        isMoved = false
+                        resetScale(vocalCtrl)
+                        if (!hasModels || !isReady) return@hookMethod true
+                        return@hookMethod chain.proceed()
+                    }
+                    if (!hasModels) {
+                        logInfo("Tap on VocalAttenuationControl with no models downloaded -> toasting & redirecting")
+                        showToast(
+                            vocalCtrl.context,
+                            "msg_download_first_toast",
+                            fallbackEn = "Please download a neural model first",
+                            fallbackIt = "Scarica prima un modello neurale"
+                        )
+                        launchSettings(vocalCtrl.context, "no models downloaded", screen = "model_selection")
+                        resetScale(vocalCtrl)
+                        return@hookMethod true
+                    }
+                    if (!isReady) {
+                        logInfo("Tap on VocalAttenuationControl while model is loading -> toasting")
+                        showToast(
+                            vocalCtrl.context,
+                            "msg_model_loading_toast",
+                            fallbackEn = "Neural model is loading…",
+                            fallbackIt = "Caricamento del modello neurale in corso…"
+                        )
+                        resetScale(vocalCtrl)
+                        return@hookMethod true
+                    }
                 }
                 MotionEvent.ACTION_CANCEL -> {
                     longPressRunnable?.let { mainHandler.removeCallbacks(it) }
                     longPressRunnable = null
                     isLongPressed = false
+                    isMoved = false
+                    resetScale(vocalCtrl)
+                    if (!hasModels || !isReady) return@hookMethod true
                 }
             }
             chain.proceed()
@@ -355,11 +360,38 @@ class VocalControlHooks(
                 event.actionButton == MotionEvent.BUTTON_SECONDARY)
 
     private fun resetScale(view: View) {
-        if (view.scaleX != 1.0f) view.scaleX = 1.0f
-        if (view.scaleY != 1.0f) view.scaleY = 1.0f
+        try {
+            view.animate().scaleX(1.0f).scaleY(1.0f).setDuration(150L).start()
+        } catch (_: Throwable) {
+            if (view.scaleX != 1.0f) view.scaleX = 1.0f
+            if (view.scaleY != 1.0f) view.scaleY = 1.0f
+        }
     }
 
-    private fun launchSettings(context: Context, reason: String) {
+    private var lastToastTime = 0L
+
+    private fun showToast(context: Context, resIdName: String, fallbackEn: String, fallbackIt: String) {
+        val now = SystemClock.uptimeMillis()
+        if (now - lastToastTime < 2000L) return
+        lastToastTime = now
+        mainHandler.post {
+            try {
+                val isItalian = java.util.Locale.getDefault().language == "it"
+                val text = try {
+                    val modCtx = context.createPackageContext("org.francasio.sing", Context.CONTEXT_IGNORE_SECURITY)
+                    val id = modCtx.resources.getIdentifier(resIdName, "string", "org.francasio.sing")
+                    if (id != 0) modCtx.getString(id) else if (isItalian) fallbackIt else fallbackEn
+                } catch (_: Throwable) {
+                    if (isItalian) fallbackIt else fallbackEn
+                }
+                android.widget.Toast.makeText(context.applicationContext ?: context, text, android.widget.Toast.LENGTH_SHORT).show()
+            } catch (t: Throwable) {
+                logError("Failed to show toast", t)
+            }
+        }
+    }
+
+    private fun launchSettings(context: Context, reason: String, screen: String? = null) {
         val now = SystemClock.uptimeMillis()
         if (now - lastShortcutLaunchTime < 500L) {
             logInfo("Suppressed duplicate settings launch ($reason, debounce)")
@@ -373,8 +405,11 @@ class VocalControlHooks(
                     Intent.FLAG_ACTIVITY_SINGLE_TOP or
                     Intent.FLAG_ACTIVITY_CLEAR_TOP
                 putExtra("from_apple_music", true)
+                if (screen != null) {
+                    putExtra("open_screen", screen)
+                }
             })
-            logInfo("Launched Sing settings ($reason)")
+            logInfo("Launched Sing settings ($reason, screen=$screen)")
         } catch (t: Throwable) {
             logError("Failed to launch Sing settings: ${t.message}", t)
         }

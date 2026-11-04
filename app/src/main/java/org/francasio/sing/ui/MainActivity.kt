@@ -118,6 +118,7 @@ class MainActivity : ComponentActivity() {
         )
         super.onCreate(savedInstanceState)
         openedFromMusicState.value = intent?.getBooleanExtra("from_apple_music", false) ?: false
+        handleScreenIntent(intent)
 
         val packageInfo = packageManager.getPackageInfo(packageName, 0)
         val whatsNewPrefs = getSharedPreferences(WhatsNewRelease.PREFS_NAME, MODE_PRIVATE)
@@ -608,10 +609,19 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    private fun handleScreenIntent(intent: Intent?) {
+        if (intent == null) return
+        val screen = intent.getStringExtra("open_screen")
+        if (screen == "model_selection") {
+            currentScreenState.value = AppScreen.MODEL_SELECTION
+        }
+    }
+
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
         openedFromMusicState.value = intent.getBooleanExtra("from_apple_music", false)
+        handleScreenIntent(intent)
         checkRunBenchmarkIntent(intent)
     }
 

@@ -50,6 +50,7 @@ fun PipelineDetailsCard(
     isOnnxModel: Boolean,
     currentModel: ModelLoader.ModelInfo?,
     hardwareTarget: String,
+    isViNNetModel: Boolean = currentModel?.isViNNet == true,
     activeProvider: String,
     onRunBenchmark: () -> Unit,
     modifier: Modifier = Modifier
@@ -216,8 +217,10 @@ fun PipelineDetailsCard(
                     valueColor = if (precisionConverted) DefaultYellowError else TextPrimary
                 )
 
-                val isHardwareFallback = remember(hardwareTarget, activeProvider) {
-                    if (activeProvider.isNotBlank()) {
+                val isHardwareFallback = remember(hardwareTarget, activeProvider, isViNNetModel) {
+                    if (isViNNetModel) {
+                        false
+                    } else if (activeProvider.isNotBlank()) {
                         when (hardwareTarget) {
                             SingSettings.TARGET_NPU -> !activeProvider.contains("HTP", ignoreCase = true) && !activeProvider.contains("NPU", ignoreCase = true)
                             SingSettings.TARGET_GPU -> !activeProvider.contains("GPU", ignoreCase = true) && !activeProvider.contains("OpenCL", ignoreCase = true) && !activeProvider.contains("Vulkan", ignoreCase = true)
@@ -227,8 +230,10 @@ fun PipelineDetailsCard(
                     } else hardwareTarget == SingSettings.TARGET_NPU && !DeviceHelper.isQualcommWithHexagonHtp
                 }
 
-                val actualHardwareDisplay = remember(hardwareTarget, activeProvider, isHardwareFallback) {
-                    if (isHardwareFallback) {
+                val actualHardwareDisplay = remember(hardwareTarget, activeProvider, isHardwareFallback, isViNNetModel) {
+                    if (isViNNetModel) {
+                        "CPU (required by Vi-NNet)"
+                    } else if (isHardwareFallback) {
                         val fallbackTarget = when {
                             activeProvider.contains("CPU", ignoreCase = true) || activeProvider.contains("XNNPACK", ignoreCase = true) -> "CPU"
                             activeProvider.contains("GPU", ignoreCase = true) || activeProvider.contains("OpenCL", ignoreCase = true) || activeProvider.contains("Vulkan", ignoreCase = true) -> "GPU"

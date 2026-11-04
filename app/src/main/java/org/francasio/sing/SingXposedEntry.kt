@@ -172,8 +172,8 @@ class SingXposedEntry : XposedModule() {
             val iconView = view.findViewById<View>(
                 view.resources.getIdentifier("vocal_off", "id", "com.apple.android.music")
             ) ?: view
-            loadingBlinkAnimator = android.animation.ValueAnimator.ofFloat(0.3f, 0.7f).apply {
-                duration = 1000L
+            loadingBlinkAnimator = android.animation.ValueAnimator.ofFloat(0.15f, 0.40f).apply {
+                duration = 900L
                 repeatMode = android.animation.ValueAnimator.REVERSE
                 repeatCount = android.animation.ValueAnimator.INFINITE
                 interpolator = android.view.animation.PathInterpolator(0.4f, 0f, 0.2f, 1f)
@@ -182,7 +182,7 @@ class SingXposedEntry : XposedModule() {
                 }
                 start()
             }
-            Log.i(TAG, "Started loading blink on vocal icon")
+            Log.i(TAG, "Started loading blink on vocal icon (0.15 to 0.40)")
         }
 
         fun stopLoadingBlink(view: View?) {
@@ -195,12 +195,37 @@ class SingXposedEntry : XposedModule() {
             val target = view?.let {
                 it.findViewById<View>(it.resources.getIdentifier("vocal_off", "id", "com.apple.android.music")) ?: it
             }
-            target?.alpha = 1.0f
+            val hasModels = org.francasio.sing.provider.SingSettings.hasDownloadedModels || (audioProcessor?.isEngineReady == true)
+            target?.alpha = if (hasModels) 1.0f else 0.40f
+        }
+
+        fun updateVocalButtonState(vocalCtrl: View) {
+            if (Looper.myLooper() != Looper.getMainLooper()) {
+                mainHandler.post { updateVocalButtonState(vocalCtrl) }
+                return
+            }
+            val iconView = vocalCtrl.findViewById<View>(
+                vocalCtrl.resources.getIdentifier("vocal_off", "id", "com.apple.android.music")
+            ) ?: vocalCtrl
+
+            val isReady = audioProcessor?.isEngineReady == true
+            val hasModels = org.francasio.sing.provider.SingSettings.hasDownloadedModels || isReady
+
+            if (!hasModels) {
+                stopLoadingBlink(vocalCtrl)
+                iconView.alpha = 0.40f
+            } else if (!isReady) {
+                startLoadingBlink(vocalCtrl)
+            } else {
+                stopLoadingBlink(vocalCtrl)
+                iconView.alpha = 1.0f
+            }
         }
 
         fun onEngineReady() {
             mainHandler.post {
                 Log.i(TAG, "Neural engine is ready!")
+                currentVocalCtrl?.get()?.let { updateVocalButtonState(it) }
                 val frag = instance?.lyricsHooks?.currentLyricsFragment?.get()
                 if (frag != null && org.francasio.sing.provider.SingSettings.forceSongEligibility) {
                     // Only force-reveal on tracks that are eligible for Sing;
@@ -304,7 +329,10 @@ class SingXposedEntry : XposedModule() {
                 return
             }
             cachedVacClass?.let { updateVocalAttenuationFloor(it) }
-            currentVocalCtrl?.get()?.let { updateSliderIcon(it) }
+            currentVocalCtrl?.get()?.let {
+                updateSliderIcon(it)
+                updateVocalButtonState(it)
+            }
             instance?.lyricsHooks?.onSettingsChanged()
         }
 
@@ -505,7 +533,12 @@ class SingXposedEntry : XposedModule() {
                     mainHandler.postDelayed(losslessReappearRunnable, 3500L)
                     Log.i(TAG, "Sing disabled -> scheduled Lossless badge restore in 3.5s")
                 }
-                currentVocalCtrl?.get()?.let { updateSliderIcon(it) }
+                currentVocalCtrl?.get()?.let {
+                    updateSliderIcon(it)
+                    if (!enabled) {
+                        updateVocalButtonState(it)
+                    }
+                }
             }
         }
 

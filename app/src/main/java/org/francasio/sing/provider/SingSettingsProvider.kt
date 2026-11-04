@@ -33,7 +33,9 @@ class SingSettingsProvider : ContentProvider() {
         return when (method) {
             SingSettings.METHOD_GET_SETTINGS -> {
                 SingSettings.loadLocal(ctx)
+                val hasModels = org.francasio.sing.util.ModelDownloader.hasAnyModelDownloaded(ctx)
                 Bundle().apply {
+                    putBoolean(SingSettings.KEY_HAS_DOWNLOADED_MODELS, hasModels)
                     putBoolean(SingSettings.KEY_PRESERVE_SIDE, SingSettings.preserveSide)
                     putBoolean(SingSettings.KEY_TWO_WAY_SLIDER, SingSettings.twoWaySlider)
                     putBoolean(SingSettings.KEY_CENTER_GROUP_LYRICS, SingSettings.centerGroupLyrics)

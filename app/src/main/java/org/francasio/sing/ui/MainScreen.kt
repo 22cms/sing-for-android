@@ -102,7 +102,8 @@ fun MainScreen(
         if (selectedModelId.isNotEmpty()) ModelLoader.findCatalogModel(selectedModelId) else null
     }
     val isOnnxModel = currentModel?.engine?.equals(SingSettings.ENGINE_ONNX, ignoreCase = true) == true
-    val isViNNetModel = currentModel?.isViNNet ?: (SingSettings.sanitizeModelId(selectedModelId) == "apple_sing_native_fp32")
+    val isViNNetModel = currentModel?.isViNNet == true ||
+        SingSettings.sanitizeModelId(selectedModelId).startsWith("apple_sing")
 
     LaunchedEffect(isOnnxModel, hardwareTarget) {
         if (isOnnxModel && hardwareTarget != SingSettings.TARGET_NPU && hardwareTarget != SingSettings.TARGET_CPU) {
@@ -211,6 +212,7 @@ fun MainScreen(
                     isOnnxModel = isOnnxModel,
                     currentModel = currentModel,
                     hardwareTarget = hardwareTarget,
+                    isViNNetModel = isViNNetModel,
                     activeProvider = activeProvider,
                     onRunBenchmark = onRunBenchmark
                 )

@@ -103,6 +103,8 @@
     <string name="status_downloaded">Scaricato</string>
     <string name="btn_delete_model">Elimina</string>
     <string name="msg_download_first">Scarica questo modello prima di selezionarlo.</string>
+    <string name="msg_download_first_toast">Scarica prima un modello neurale</string>
+    <string name="msg_model_loading_toast">Caricamento del modello neurale in corso…</string>
 
     <!-- Info Screen -->
     <string name="title_info">Info</string>

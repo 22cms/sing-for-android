@@ -174,7 +174,8 @@ object ModelLoader {
                 else -> "Other"
             }
         }
-        val isViNNet: Boolean get() = engine.equals(SingSettings.ENGINE_NATIVE, ignoreCase = true) || modelId == "apple_sing"
+        val isViNNet: Boolean get() = engine.equals(SingSettings.ENGINE_NATIVE, ignoreCase = true) ||
+            modelId == "apple_sing" || resolvedFamily.equals("Vi-NNet", ignoreCase = true)
         val isOnnx: Boolean get() = engine.equals(SingSettings.ENGINE_ONNX, ignoreCase = true)
         val isMnn: Boolean get() = engine.equals(SingSettings.ENGINE_MNN, ignoreCase = true)
         val runtimeBadge: String get() = when {

@@ -25,6 +25,7 @@ object SingSettings {
     const val KEY_HARDWARE_TARGET = "hardware_target"
     const val KEY_FORCE_CPU = "force_cpu"
     const val KEY_SELECTED_MODEL = "selected_model"
+    const val KEY_HAS_DOWNLOADED_MODELS = "has_downloaded_models"
 
     const val TARGET_NPU = "NPU"
     const val TARGET_GPU = "GPU"
@@ -113,6 +114,9 @@ object SingSettings {
     var selectedModelId: String = DEFAULT_MODEL_ID
 
     @Volatile
+    var hasDownloadedModels: Boolean = false
+
+    @Volatile
     var allowZeroFloor: Boolean = false
 
     @Volatile
@@ -148,6 +152,11 @@ object SingSettings {
         selectedModelId = sanitizeModelId(prefs.getString(KEY_SELECTED_MODEL, DEFAULT_MODEL_ID))
         if (selectedModelId.isNotEmpty()) {
             org.francasio.sing.util.ModelLoader.loadSelectedModel(context)
+        }
+        hasDownloadedModels = prefs.getBoolean(KEY_HAS_DOWNLOADED_MODELS, false)
+        if (context.packageName == "org.francasio.sing") {
+            hasDownloadedModels = org.francasio.sing.util.ModelDownloader.hasAnyModelDownloaded(context)
+            prefs.edit().putBoolean(KEY_HAS_DOWNLOADED_MODELS, hasDownloadedModels).apply()
         }
         allowZeroFloor = prefs.getBoolean(KEY_ALLOW_ZERO_FLOOR, false)
         forceSongEligibility = prefs.getBoolean(KEY_FORCE_SONG_ELIGIBILITY, false)
@@ -290,10 +299,16 @@ object SingSettings {
 
     fun createSettingsUpdateIntent(context: Context, targetPackage: String? = null): Intent {
         val modelInfo = org.francasio.sing.util.ModelLoader.findCatalogModel(selectedModelId)
+        val hasModels = if (context.packageName == "org.francasio.sing") {
+            org.francasio.sing.util.ModelDownloader.hasAnyModelDownloaded(context)
+        } else {
+            hasDownloadedModels
+        }
         return Intent(ACTION_SETTINGS_UPDATE).apply {
             if (targetPackage != null) {
                 setPackage(targetPackage)
             }
+            putExtra(KEY_HAS_DOWNLOADED_MODELS, hasModels)
             putExtra(KEY_PRESERVE_SIDE, preserveSide)
             putExtra(KEY_TWO_WAY_SLIDER, twoWaySlider)
             putExtra(KEY_CENTER_GROUP_LYRICS, centerGroupLyrics)
@@ -354,6 +369,7 @@ object SingSettings {
             val uri = Uri.parse("content://org.francasio.sing.provider")
             val bundle = context.contentResolver.call(uri, METHOD_GET_SETTINGS, null, null)
             if (bundle != null) {
+                hasDownloadedModels = bundle.getBoolean(KEY_HAS_DOWNLOADED_MODELS, hasDownloadedModels)
                 preserveSide = bundle.getBoolean(KEY_PRESERVE_SIDE, preserveSide)
                 twoWaySlider = bundle.getBoolean(KEY_TWO_WAY_SLIDER, twoWaySlider)
                 centerGroupLyrics = bundle.getBoolean(KEY_CENTER_GROUP_LYRICS, centerGroupLyrics)
@@ -381,6 +397,7 @@ object SingSettings {
                 try {
                     val prefs = context.getSharedPreferences(PREFS_CACHE, Context.MODE_PRIVATE)
                     prefs.edit()
+                        .putBoolean(KEY_HAS_DOWNLOADED_MODELS, hasDownloadedModels)
                         .putBoolean(KEY_PRESERVE_SIDE, preserveSide)
                         .putBoolean(KEY_TWO_WAY_SLIDER, twoWaySlider)
                         .putBoolean(KEY_CENTER_GROUP_LYRICS, centerGroupLyrics)
@@ -485,6 +502,7 @@ object SingSettings {
         // 1. Read cached settings immediately
         try {
             val prefs = context.getSharedPreferences(PREFS_CACHE, Context.MODE_PRIVATE)
+            hasDownloadedModels = prefs.getBoolean(KEY_HAS_DOWNLOADED_MODELS, false)
             preserveSide = prefs.getBoolean(KEY_PRESERVE_SIDE, false)
             twoWaySlider = prefs.getBoolean(KEY_TWO_WAY_SLIDER, false)
             centerGroupLyrics = prefs.getBoolean(KEY_CENTER_GROUP_LYRICS, true)

@@ -46,6 +46,45 @@ object ModelDownloader {
         return null
     }
 
+    fun hasAnyModelDownloaded(context: Context): Boolean {
+        val appContext = context.applicationContext ?: context
+        try {
+            ModelLoader.loadModels(appContext)
+            for (m in ModelLoader.AVAILABLE_MODELS) {
+                if (isModelDownloaded(appContext, m)) {
+                    return true
+                }
+            }
+        } catch (_: Throwable) {}
+
+        val dirs = listOf(
+            getModelsDir(appContext),
+            File(appContext.filesDir, "models"),
+            File("/data/user/0/org.francasio.sing/files/models"),
+            File("/data/data/org.francasio.sing/files/models"),
+            File("/sdcard/Download/sing_models"),
+            File("/storage/emulated/0/Download/sing_models")
+        )
+        for (dir in dirs) {
+            try {
+                if (dir.exists() && dir.isDirectory) {
+                    val files = dir.listFiles()
+                    if (files != null) {
+                        for (f in files) {
+                            if (f.isFile && f.canRead() && f.length() > 1024 * 1024) {
+                                val name = f.name.lowercase()
+                                if (name.endsWith(".onnx") || name.endsWith(".mnn") || name.endsWith(".bin")) {
+                                    return true
+                                }
+                            }
+                        }
+                    }
+                }
+            } catch (_: Throwable) {}
+        }
+        return false
+    }
+
     fun isModelDownloaded(context: Context, model: ModelLoader.ModelInfo): Boolean {
         if (getDownloadedModelFile(context, model.fileName) != null) {
             return true
@@ -108,6 +147,7 @@ object ModelDownloader {
         val stillAvailable = getDownloadedModelFile(context, model.fileName) != null
         downloadStates[model.id] = if (stillAvailable) DownloadState.Completed else DownloadState.Idle
         Log.i(TAG, "Deleted model ${model.fileName}: deleted=$deletedAny, stillAvailable=$stillAvailable")
+        SingSettings.broadcastSettings(context)
         return !stillAvailable
     }
 
@@ -257,6 +297,7 @@ object ModelDownloader {
 
                 mainHandler.post {
                     downloadStates[model.id] = DownloadState.Completed
+                    SingSettings.broadcastSettings(appContext)
                     onComplete?.invoke()
                 }
 
