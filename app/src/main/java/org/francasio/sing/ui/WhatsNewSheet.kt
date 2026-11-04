@@ -3,7 +3,10 @@ package org.francasio.sing.ui
 import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.Orientation
+import androidx.compose.foundation.gestures.draggable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -21,6 +24,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.outlined.Dashboard
 import androidx.compose.material.icons.outlined.GraphicEq
+import androidx.compose.material3.BottomSheetDefaults
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -73,6 +77,7 @@ sealed interface ReleaseSheetMode {
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
+@Suppress("INVISIBLE_REFERENCE", "INVISIBLE_MEMBER")
 @Composable
 fun ReleaseHighlightsSheet(
     mode: ReleaseSheetMode,
@@ -100,6 +105,32 @@ fun ReleaseHighlightsSheet(
     ModalBottomSheet(
         onDismissRequest = { if (!isConfirming) onDismiss() },
         sheetState = sheetState,
+        sheetGesturesEnabled = false,
+        dragHandle = {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 4.dp)
+                    .draggable(
+                        state = sheetState.anchoredDraggableState.draggableState,
+                        orientation = Orientation.Vertical,
+                        enabled = sheetState.isVisible,
+                        startDragImmediately = sheetState.anchoredDraggableState.isAnimationRunning,
+                        onDragStopped = { velocity ->
+                            coroutineScope
+                                .launch { sheetState.settle(velocity) }
+                                .invokeOnCompletion {
+                                    if (!sheetState.isVisible && !isConfirming) {
+                                        onDismiss()
+                                    }
+                                }
+                        }
+                    ),
+                contentAlignment = Alignment.Center
+            ) {
+                BottomSheetDefaults.DragHandle()
+            }
+        },
         shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp),
         containerColor = SurfaceDark
     ) {
