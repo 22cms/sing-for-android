@@ -49,7 +49,6 @@ object ModelDownloader {
     fun hasAnyModelDownloaded(context: Context): Boolean {
         val appContext = context.applicationContext ?: context
         try {
-            ModelLoader.loadModels(appContext)
             for (m in ModelLoader.AVAILABLE_MODELS) {
                 if (isModelDownloaded(appContext, m)) {
                     return true
@@ -57,14 +56,23 @@ object ModelDownloader {
             }
         } catch (_: Throwable) {}
 
-        val dirs = listOf(
-            getModelsDir(appContext),
+        val modelsDir = getModelsDir(appContext)
+        val dirs = mutableListOf(
+            modelsDir,
             File(appContext.filesDir, "models"),
             File("/data/user/0/org.francasio.sing/files/models"),
-            File("/data/data/org.francasio.sing/files/models"),
-            File("/sdcard/Download/sing_models"),
-            File("/storage/emulated/0/Download/sing_models")
+            File("/data/data/org.francasio.sing/files/models")
         )
+        val hasStoragePerm = try {
+            android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.R ||
+                appContext.checkSelfPermission(android.Manifest.permission.READ_EXTERNAL_STORAGE) ==
+                    android.content.pm.PackageManager.PERMISSION_GRANTED
+        } catch (_: Throwable) { false }
+        if (hasStoragePerm) {
+            dirs.add(File("/sdcard/Download/sing_models"))
+            dirs.add(File("/storage/emulated/0/Download/sing_models"))
+        }
+
         for (dir in dirs) {
             try {
                 if (dir.exists() && dir.isDirectory) {
@@ -73,7 +81,7 @@ object ModelDownloader {
                         for (f in files) {
                             if (f.isFile && f.canRead() && f.length() > 1024 * 1024) {
                                 val name = f.name.lowercase()
-                                if (name.endsWith(".onnx") || name.endsWith(".mnn") || name.endsWith(".bin")) {
+                                if (name.endsWith(".onnx") || name.endsWith(".mnn") || name.endsWith(".bin") || name.endsWith(".vinet")) {
                                     return true
                                 }
                             }
@@ -127,14 +135,21 @@ object ModelDownloader {
 
     fun deleteModel(context: Context, model: ModelLoader.ModelInfo): Boolean {
         val modelsDir = getModelsDir(context)
-        val candidates = listOf(
+        val candidates = mutableListOf(
             File(modelsDir, model.fileName),
             File(modelsDir, "${model.fileName}.tmp"),
             File(context.cacheDir, model.fileName),
-            File(context.cacheDir, "${model.fileName}.tmp"),
-            File("/sdcard/Download/sing_models", model.fileName),
-            File("/storage/emulated/0/Download/sing_models", model.fileName)
+            File(context.cacheDir, "${model.fileName}.tmp")
         )
+        val hasStoragePerm = try {
+            android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.R ||
+                context.checkSelfPermission(android.Manifest.permission.READ_EXTERNAL_STORAGE) ==
+                    android.content.pm.PackageManager.PERMISSION_GRANTED
+        } catch (_: Throwable) { false }
+        if (hasStoragePerm) {
+            candidates.add(File("/sdcard/Download/sing_models", model.fileName))
+            candidates.add(File("/storage/emulated/0/Download/sing_models", model.fileName))
+        }
         var deletedAny = false
         for (f in candidates) {
             if (!f.exists()) continue

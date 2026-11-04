@@ -588,20 +588,28 @@ object ModelLoader {
         }
 
         // 1. Check shared /sdcard/Download/sing_models/models.json (for unrooted LSPatch)
-        val sdcardJsonCandidates = listOf(
-            File("/sdcard/Download/sing_models/models.json"),
-            File("/storage/emulated/0/Download/sing_models/models.json")
-        )
-        for (f in sdcardJsonCandidates) {
-            try {
-                if (f.exists() && f.canRead() && f.length() > 0) {
-                    val jsonStr = f.readText()
-                    val parsed = parseModelsJson(jsonStr)
-                    updateModelCatalog(parsed.first, parsed.second)
-                    Log.i(TAG, "Loaded models.json from ${f.absolutePath}")
-                    return MODEL_DEFINITIONS
-                }
-            } catch (_: Throwable) {}
+        val hasStoragePerm = try {
+            android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.R ||
+                context.checkSelfPermission(android.Manifest.permission.READ_EXTERNAL_STORAGE) ==
+                    android.content.pm.PackageManager.PERMISSION_GRANTED
+        } catch (_: Throwable) { false }
+
+        if (hasStoragePerm) {
+            val sdcardJsonCandidates = listOf(
+                File("/sdcard/Download/sing_models/models.json"),
+                File("/storage/emulated/0/Download/sing_models/models.json")
+            )
+            for (f in sdcardJsonCandidates) {
+                try {
+                    if (f.exists() && f.canRead() && f.length() > 0) {
+                        val jsonStr = f.readText()
+                        val parsed = parseModelsJson(jsonStr)
+                        updateModelCatalog(parsed.first, parsed.second)
+                        Log.i(TAG, "Loaded models.json from ${f.absolutePath}")
+                        return MODEL_DEFINITIONS
+                    }
+                } catch (_: Throwable) {}
+            }
         }
 
         // 2. Check cached models.json in filesDir
@@ -618,18 +626,20 @@ object ModelLoader {
             }
         }
 
-        // 3. Check ContentProvider
-        try {
-            val contentUri = Uri.parse("content://org.francasio.sing.provider/models/models.json")
-            context.contentResolver.openInputStream(contentUri)?.use { input ->
-                val jsonStr = input.bufferedReader().readText()
-                val parsed = parseModelsJson(jsonStr)
-                try { cached.writeText(jsonStr) } catch (_: Throwable) {}
-                updateModelCatalog(parsed.first, parsed.second)
-                Log.i(TAG, "Loaded models.json from ContentProvider")
-                return MODEL_DEFINITIONS
-            }
-        } catch (_: Throwable) {}
+        // 3. Check ContentProvider (only for external callers like Apple Music; NEVER from org.francasio.sing itself)
+        if (context.packageName != "org.francasio.sing") {
+            try {
+                val contentUri = Uri.parse("content://org.francasio.sing.provider/models/models.json")
+                context.contentResolver.openInputStream(contentUri)?.use { input ->
+                    val jsonStr = input.bufferedReader().readText()
+                    val parsed = parseModelsJson(jsonStr)
+                    try { cached.writeText(jsonStr) } catch (_: Throwable) {}
+                    updateModelCatalog(parsed.first, parsed.second)
+                    Log.i(TAG, "Loaded models.json from ContentProvider")
+                    return MODEL_DEFINITIONS
+                }
+            } catch (_: Throwable) {}
+        }
 
         return MODEL_DEFINITIONS
     }
@@ -827,14 +837,22 @@ object ModelLoader {
 
     fun getCandidateModelFiles(context: Context, fileName: String): List<File> {
         require(org.francasio.sing.provider.SettingsValidation.isModelFileName(fileName)) { "Invalid model filename" }
-        return listOf(
+        val list = mutableListOf(
             File(File(context.filesDir, "models"), fileName),
-            File("/sdcard/Download/sing_models", fileName),
-            File("/storage/emulated/0/Download/sing_models", fileName),
             File("/data/user/0/org.francasio.sing/files/models", fileName),
             File("/data/data/org.francasio.sing/files/models", fileName),
             File(context.cacheDir, fileName)
         )
+        val hasStoragePerm = try {
+            android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.R ||
+                context.checkSelfPermission(android.Manifest.permission.READ_EXTERNAL_STORAGE) ==
+                    android.content.pm.PackageManager.PERMISSION_GRANTED
+        } catch (_: Throwable) { false }
+        if (hasStoragePerm) {
+            list.add(File("/sdcard/Download/sing_models", fileName))
+            list.add(File("/storage/emulated/0/Download/sing_models", fileName))
+        }
+        return list
     }
 
     private fun ensureModelExtracted(context: Context, moduleApkPath: String, fileName: String): File {

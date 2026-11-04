@@ -154,10 +154,6 @@ object SingSettings {
             org.francasio.sing.util.ModelLoader.loadSelectedModel(context)
         }
         hasDownloadedModels = prefs.getBoolean(KEY_HAS_DOWNLOADED_MODELS, false)
-        if (context.packageName == "org.francasio.sing") {
-            hasDownloadedModels = org.francasio.sing.util.ModelDownloader.hasAnyModelDownloaded(context)
-            prefs.edit().putBoolean(KEY_HAS_DOWNLOADED_MODELS, hasDownloadedModels).apply()
-        }
         allowZeroFloor = prefs.getBoolean(KEY_ALLOW_ZERO_FLOOR, false)
         forceSongEligibility = prefs.getBoolean(KEY_FORCE_SONG_ELIGIBILITY, false)
         materialYou = prefs.getBoolean(KEY_MATERIAL_YOU, true)
@@ -297,13 +293,24 @@ object SingSettings {
         }
     }
 
-    fun createSettingsUpdateIntent(context: Context, targetPackage: String? = null): Intent {
-        val modelInfo = org.francasio.sing.util.ModelLoader.findCatalogModel(selectedModelId)
-        val hasModels = if (context.packageName == "org.francasio.sing") {
+    fun updateHasDownloadedModels(context: Context): Boolean {
+        val has = if (context.packageName == "org.francasio.sing") {
             org.francasio.sing.util.ModelDownloader.hasAnyModelDownloaded(context)
         } else {
             hasDownloadedModels
         }
+        hasDownloadedModels = has
+        try {
+            val prefsName = if (context.packageName == "org.francasio.sing") PREFS_MODULE else PREFS_CACHE
+            context.getSharedPreferences(prefsName, Context.MODE_PRIVATE)
+                .edit().putBoolean(KEY_HAS_DOWNLOADED_MODELS, has).apply()
+        } catch (_: Throwable) {}
+        return has
+    }
+
+    fun createSettingsUpdateIntent(context: Context, targetPackage: String? = null): Intent {
+        val modelInfo = org.francasio.sing.util.ModelLoader.findCatalogModel(selectedModelId)
+        val hasModels = hasDownloadedModels
         return Intent(ACTION_SETTINGS_UPDATE).apply {
             if (targetPackage != null) {
                 setPackage(targetPackage)
@@ -344,6 +351,9 @@ object SingSettings {
 
     fun broadcastSettings(context: Context) {
         try {
+            if (context.packageName == "org.francasio.sing") {
+                updateHasDownloadedModels(context)
+            }
             val baseUri = Uri.parse("content://org.francasio.sing.provider/")
             try {
                 context.grantUriPermission(

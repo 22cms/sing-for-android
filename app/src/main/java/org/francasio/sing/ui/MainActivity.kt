@@ -142,8 +142,10 @@ class MainActivity : ComponentActivity() {
         ModelLoader.loadModels(this)
         syncUiStatesWithSettings()
         bgExecutor.execute {
+            SingSettings.updateHasDownloadedModels(this)
             ModelDownloader.prewarmDownloadStates(this, ModelLoader.AVAILABLE_MODELS)
             ModelLoader.refreshModels(this) {
+                SingSettings.updateHasDownloadedModels(this)
                 if (isUpdated) {
                     val updatedInfo = ModelLoader.findCatalogModel(SingSettings.selectedModelId)
                     if (updatedInfo != null) {
