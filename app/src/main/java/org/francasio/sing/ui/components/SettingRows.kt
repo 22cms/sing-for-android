@@ -292,29 +292,31 @@ fun SettingHardwareTargetRow(
             horizontalArrangement = Arrangement.spacedBy(ButtonGroupDefaults.ConnectedSpaceBetween)
         ) {
             targets.forEachIndexed { index, target ->
-                val isSelected = (effectiveTarget == target)
-                ToggleButton(
-                    checked = isSelected,
-                    onCheckedChange = { onHardwareTargetChange(target) },
-                    modifier = Modifier.weight(1f),
-                    shapes = when (index) {
-                        0 -> ButtonGroupDefaults.connectedLeadingButtonShapes()
-                        targets.lastIndex -> ButtonGroupDefaults.connectedTrailingButtonShapes()
-                        else -> ButtonGroupDefaults.connectedMiddleButtonShapes()
-                    },
-                    colors = ToggleButtonDefaults.toggleButtonColors(
-                        containerColor = SurfaceContainerHigh,
-                        contentColor = TextSecondary,
-                        checkedContainerColor = Primary,
-                        checkedContentColor = checkedTextColor
-                    )
-                ) {
-                    Text(
-                        text = target,
-                        fontSize = 12.sp,
-                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
-                        color = if (isSelected) checkedTextColor else TextSecondary
-                    )
+                androidx.compose.runtime.key(target) {
+                    val isSelected = (effectiveTarget == target)
+                    ToggleButton(
+                        checked = isSelected,
+                        onCheckedChange = { onHardwareTargetChange(target) },
+                        modifier = Modifier.weight(1f),
+                        shapes = when (index) {
+                            0 -> ButtonGroupDefaults.connectedLeadingButtonShapes()
+                            targets.lastIndex -> ButtonGroupDefaults.connectedTrailingButtonShapes()
+                            else -> ButtonGroupDefaults.connectedMiddleButtonShapes()
+                        },
+                        colors = ToggleButtonDefaults.toggleButtonColors(
+                            containerColor = SurfaceContainerHigh,
+                            contentColor = TextSecondary,
+                            checkedContainerColor = Primary,
+                            checkedContentColor = checkedTextColor
+                        )
+                    ) {
+                        Text(
+                            text = target,
+                            fontSize = 12.sp,
+                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                            color = if (isSelected) checkedTextColor else TextSecondary
+                        )
+                    }
                 }
             }
         }

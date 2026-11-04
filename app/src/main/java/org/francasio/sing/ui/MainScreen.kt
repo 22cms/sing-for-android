@@ -97,16 +97,17 @@ fun MainScreen(
     val context = LocalContext.current
     val apkVersion = remember(context) { DeviceHelper.getAppVersion(context) }
 
-    val catalogVersion = ModelLoader.catalogVersion
-    val currentModel = remember(selectedModelId, catalogVersion) {
-        if (selectedModelId.isNotEmpty()) ModelLoader.findCatalogModel(selectedModelId) else null
-    }
+    val currentModel = if (selectedModelId.isNotEmpty()) ModelLoader.findCatalogModel(selectedModelId) else null
     val isOnnxModel = currentModel?.engine?.equals(SingSettings.ENGINE_ONNX, ignoreCase = true) == true
     val isViNNetModel = currentModel?.isViNNet == true ||
         SingSettings.sanitizeModelId(selectedModelId).startsWith("apple_sing")
 
-    LaunchedEffect(isOnnxModel, hardwareTarget) {
-        if (isOnnxModel && hardwareTarget != SingSettings.TARGET_NPU && hardwareTarget != SingSettings.TARGET_CPU) {
+    LaunchedEffect(isOnnxModel, isViNNetModel, hardwareTarget) {
+        if (isViNNetModel) {
+            if (hardwareTarget != SingSettings.TARGET_CPU) {
+                onHardwareTargetChange(SingSettings.TARGET_CPU)
+            }
+        } else if (isOnnxModel && hardwareTarget != SingSettings.TARGET_NPU && hardwareTarget != SingSettings.TARGET_CPU) {
             onHardwareTargetChange(SingSettings.TARGET_NPU)
         }
     }

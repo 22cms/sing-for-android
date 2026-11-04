@@ -25,9 +25,10 @@ fun PerformanceSettingsCard(
 ) {
     GroupedSection(
         title = stringResource(id = R.string.title_performance_settings),
+        key = "$isViNNetModel-$isOnnxModel",
         modifier = modifier
     ) {
-        item {
+        item(key = "eco_mode") {
             SettingSwitchRow(
                 icon = painterResource(id = R.drawable.ic_thermometer_low),
                 title = stringResource(id = R.string.setting_eco_mode_title),
@@ -37,7 +38,7 @@ fun PerformanceSettingsCard(
             )
         }
         if (!isViNNetModel) {
-            item {
+            item(key = "hardware_target") {
                 SettingHardwareTargetRow(
                     hardwareTarget = hardwareTarget,
                     isOnnx = isOnnxModel,
@@ -45,7 +46,7 @@ fun PerformanceSettingsCard(
                 )
             }
         }
-        item {
+        item(key = "thread_count") {
             SettingSliderRow(
                 icon = painterResource(id = R.drawable.ic_layers_3),
                 title = stringResource(id = R.string.setting_thread_count_title),

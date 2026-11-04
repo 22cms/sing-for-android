@@ -450,7 +450,10 @@ class MainActivity : ComponentActivity() {
                                     selectedModelIdState.value = modelId
                                     SingSettings.saveLocalString(this@MainActivity, SingSettings.KEY_SELECTED_MODEL, modelId)
                                     val info = ModelLoader.findCatalogModel(modelId)
-                                    if (info?.engine?.equals(SingSettings.ENGINE_ONNX, ignoreCase = true) == true) {
+                                    if (info?.isViNNet == true || modelId.startsWith("apple_sing")) {
+                                        hardwareTargetState.value = SingSettings.TARGET_CPU
+                                        SingSettings.saveLocalString(this@MainActivity, SingSettings.KEY_HARDWARE_TARGET, SingSettings.TARGET_CPU)
+                                    } else if (info?.engine?.equals(SingSettings.ENGINE_ONNX, ignoreCase = true) == true) {
                                         if (hardwareTargetState.value != SingSettings.TARGET_NPU && hardwareTargetState.value != SingSettings.TARGET_CPU) {
                                             hardwareTargetState.value = SingSettings.TARGET_NPU
                                             SingSettings.saveLocalString(this@MainActivity, SingSettings.KEY_HARDWARE_TARGET, SingSettings.TARGET_NPU)
