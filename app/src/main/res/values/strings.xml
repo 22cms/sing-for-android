@@ -12,7 +12,9 @@
     <string name="whats_new_desc_1" translatable="false">Sing for Android now uses your tablet\' screen real estate more wisely, instead of simply scaling the mobile UI.</string>
     <string name="whats_new_title_2" translatable="false">Conversion-free Passthrough</string>
     <string name="whats_new_desc_2" translatable="false">When Sing mode is turned off, audio now passes through directly in its native precision, preventing format conversions during playback and reducing CPU usage.</string>
-    <string name="minor_changes" translatable="false" formatted="false">• Fixed a crash when switching neural models during active audio playback\n• Improved audio separation quality and reduced high-frequency bleed for VR-Arch and MDXNet models\n• Fixed crashes caused by invalid stored slider positions\n• Automatic model catalog cache refresh on app update\n• Attempted to fix lyrics blur on tracks with immediate vocals\n• Added XNNPACK support for ONNXRuntime (on non Qualcomm devices)\n• Updated and refined strings</string>
+    <string name="whats_new_title_3" translatable="false">Real Benchmark Scores</string>
+    <string name="whats_new_desc_3" translatable="false">In-app benchmarks for MDX-Net models now provide accurate performance metrics.</string>
+    <string name="minor_changes" translatable="false" formatted="false">• Replaced custom resampler with SpeexDSP\n• Shortened VR-Arch chunk overlap from 16,384 to 4,096 samples using a quintic smootherstep\n• Fixed a crash when switching neural models during active audio playback\n• Improved audio separation quality and reduced high-frequency bleed for VR-Arch and MDXNet models\n• Fixed crashes caused by invalid stored slider positions\n• Automatic model catalog cache refresh on app update\n• Attempted to fix lyrics blur on tracks with immediate vocals\n• Added XNNPACK support for ONNXRuntime (on non Qualcomm devices)\n• Updated and refined strings</string>
     <string name="whats_new_minor_changes">Minor changes</string>
     <string name="whats_new_close">Close</string>
     <string name="update_available_heading">New Update Available</string>

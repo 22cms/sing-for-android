@@ -20,6 +20,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.outlined.Dashboard
+import androidx.compose.material.icons.outlined.GraphicEq
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -62,7 +63,8 @@ private data class WhatsNewFeature(val icon: Any, val title: Int, val descriptio
 
 private val releaseFeatures = listOf(
     WhatsNewFeature(Icons.Outlined.Dashboard, R.string.whats_new_title_1, R.string.whats_new_desc_1),
-    WhatsNewFeature(R.drawable.ic_speedometer_70, R.string.whats_new_title_2, R.string.whats_new_desc_2)
+    WhatsNewFeature(Icons.Outlined.GraphicEq, R.string.whats_new_title_2, R.string.whats_new_desc_2),
+    WhatsNewFeature(R.drawable.ic_speedometer_70, R.string.whats_new_title_3, R.string.whats_new_desc_3)
 )
 
 sealed interface ReleaseSheetMode {
