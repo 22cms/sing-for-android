@@ -37,7 +37,7 @@ plugins {
 }
 
 // Mark this release as minor: suppresses the update pop-up while preserving other update mechanisms.
-var isMinorUpdate = false
+var isMinorUpdate = true
 
 android {
     namespace = "org.francasio.sing"
@@ -49,8 +49,8 @@ android {
         // Android 11 (API 30) minimum SDK to match Apple Music's minimum SDK version
         minSdk = 30
         targetSdk = 34
-        versionCode = 3
-        versionName = "1.2"
+        versionCode = 4
+        versionName = "1.2.1"
         testInstrumentationRunner = "org.francasio.sing.AudioRegressionInstrumentation"
 
         ndk {
