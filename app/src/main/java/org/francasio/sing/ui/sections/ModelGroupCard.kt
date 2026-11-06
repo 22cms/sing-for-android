@@ -351,6 +351,7 @@ fun ModelGroupCard(
                 ModelVersionRow(
                     modelInfo = modelInfo,
                     isSelected = isSelected,
+                    isExpanded = isExpanded,
                     highlightPulse = if (isSelected) highlightPulse else 0f,
                     onSelect = { onVersionSelect(version.id) }
                 )
@@ -411,6 +412,7 @@ fun ModelGroupCard(
 private fun ModelVersionRow(
     modelInfo: ModelLoader.ModelInfo,
     isSelected: Boolean,
+    isExpanded: Boolean,
     highlightPulse: Float = 0f,
     onSelect: () -> Unit
 ) {
@@ -511,7 +513,7 @@ private fun ModelVersionRow(
                 }
 
                 // Recommended badge on its own line under model format so it never wraps or cuts off
-                if (modelInfo.isRecommended) {
+                if (isExpanded && modelInfo.isRecommended) {
                     Spacer(modifier = Modifier.height(6.dp))
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         StatusBadge(
