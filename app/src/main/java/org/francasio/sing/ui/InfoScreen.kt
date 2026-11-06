@@ -92,15 +92,13 @@ fun InfoScreen(
     val isMaterialYou = LocalIsMaterialYou.current
 
     val thirdPartyProjects = buildList {
-        if (org.francasio.sing.util.ModelLoader.isOnnxRuntimeAvailable) {
-            add(
-                ThirdPartyProject(
-                    name = "ONNX Runtime & QNN Execution Provider",
-                    authors = "Microsoft Corporation & Qualcomm Technologies",
-                    description = "Neural network inference with Qualcomm Hexagon HTP NPU hardware acceleration and multithreaded CPU fallback."
-                )
+        add(
+            ThirdPartyProject(
+                name = "ONNX Runtime & QNN Execution Provider",
+                authors = "Microsoft Corporation & Qualcomm Technologies",
+                description = "Neural network inference with Qualcomm Hexagon HTP NPU hardware acceleration and multithreaded CPU fallback."
             )
-        }
+        )
         add(
             ThirdPartyProject(
                 name = "Alibaba MNN",
@@ -127,6 +125,13 @@ fun InfoScreen(
                 name = "KISS FFT",
                 authors = "Mark Borgerding (mborgerding)",
                 description = "Fast Fourier Transform (FFT) library that tries to Keep It Simple, Stupid"
+            )
+        )
+        add(
+            ThirdPartyProject(
+                name = "SpeexDSP",
+                authors = "Xiph.Org Foundation",
+                description = "DSP library derived from the Speex codec"
             )
         )
     }
