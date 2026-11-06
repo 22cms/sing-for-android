@@ -65,10 +65,14 @@ import org.francasio.sing.update.UpdateInfo
 
 private data class WhatsNewFeature(val icon: Any, val title: Int, val description: Int)
 
-private val releaseFeatures = listOf(
-    WhatsNewFeature(Icons.Outlined.Dashboard, R.string.whats_new_title_1, R.string.whats_new_desc_1),
-    WhatsNewFeature(Icons.Outlined.GraphicEq, R.string.whats_new_title_2, R.string.whats_new_desc_2),
-    WhatsNewFeature(R.drawable.ic_speedometer_70, R.string.whats_new_title_3, R.string.whats_new_desc_3)
+private val releaseFeatures = listOf<WhatsNewFeature>(
+    /**
+    * WhatsNewFeature(
+    *     Icons.Outlined.Dashboard,
+    *     R.string.whats_new_title_1,
+    *     R.string.whats_new_desc_1
+    * )
+    */
 )
 
 sealed interface ReleaseSheetMode {
