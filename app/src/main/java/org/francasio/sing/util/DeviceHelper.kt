@@ -7,6 +7,27 @@ import android.util.Log
 object DeviceHelper {
     private const val TAG = "AppleSing_Device"
 
+    /**
+     * Regex matching only Qualcomm SoCs featuring an Hexagon Tensor Processor (HTP):
+     * - SM8350 .. SM8850+ (888 through 8 Elite and beyond)
+     * - SM7325 .. SM7675+ (778G, 7 Gen 1/2/3, 7s Gen 2/3, 7+ Gen 2/3)
+     * - SM6450 .. SM6475+ (6 Gen 1, 6 Gen 3)
+     * - SC8380XP .. SC8480XP+ (Snapdragon X Elite / X2 Elite)
+     *
+     *  Rejects Hexagon DSP chips:
+     * - SM8150 (855), SM8250 (865)
+     * - SM7150 (732G), SM7250 (765G), SM7225 (750G)
+     * - SM6375 (Snapdragon 6s Gen 3 / 695)
+     * - SM6225 (Snapdragon 680 / 685)
+     * - SM4350, SM4375, SM4450 (Snapdragon 4 Gen 1 / 4 Gen 2 / 4s Gen 2)
+     *
+     * Will definitely need to be updated in the future, as new Qualcomm SoCs will likely use an incompatible schema.
+     */
+    private val HTP_SOC_REGEX = Regex(
+        """\b(?:S[MC]8[3-9]\d{2}|SM7[3-9]\d{2}|SM6[4-9]\d{2}|SC8[3-9]\d{2}|QC[SM][68]\d{3})""",
+        RegexOption.IGNORE_CASE
+    )
+
     fun getSystemProperty(key: String): String {
         return try {
             val c = Class.forName("android.os.SystemProperties")
@@ -34,20 +55,6 @@ object DeviceHelper {
         }
     }
 
-    /**
-     * Determines whether the current device is a Qualcomm device equipped with
-     * a Hexagon Tensor Processor (HTP NPU).
-     *
-     * HTP was introduced in Snapdragon 888 (SM8350, HTP V68) and 778G (SM7325),
-     * followed by Snapdragon 8 Gen 1/2/3/Elite (SM8450, SM8550, SM8650, SM8750),
-     * Snapdragon 8s Gen 3 (SM8635), Snapdragon 7+ Gen 2/3 (SM7475, SM7675),
-     * Snapdragon 7 Gen 1/3 (SM7450, SM7550), and Snapdragon X Elite (SC8380XP).
-     *
-     * Older Qualcomm SoCs (e.g. Snapdragon 732G/SM7150, 765G/SM7250, 865/SM8250,
-     * 855/SM8150, 680/SM6225) only have a classic CDSP/aDSP without HTP architecture.
-     * Non-Qualcomm SoCs (MediaTek Dimensity, Google Tensor, Samsung Exynos) do not
-     * have Hexagon HTP.
-     */
     val isQualcommWithHexagonHtp: Boolean by lazy {
         val hardware = Build.HARDWARE.lowercase()
         val board = Build.BOARD.lowercase()
@@ -56,48 +63,31 @@ object DeviceHelper {
         } else {
             getSystemProperty("ro.soc.manufacturer").lowercase()
         }
-        val roHardware = getSystemProperty("ro.hardware").lowercase()
-        val bootHardware = getSystemProperty("ro.boot.hardware").lowercase()
 
         val isQualcomm = hardware.contains("qcom") ||
                 board.contains("qcom") ||
                 socManufacturer.contains("qti") ||
                 socManufacturer.contains("qualcomm") ||
-                roHardware.contains("qcom") ||
-                bootHardware.contains("qcom")
+                getSystemProperty("ro.hardware").lowercase().contains("qcom")
 
-        val socModel = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            Build.SOC_MODEL.uppercase()
-        } else {
-            getSystemProperty("ro.soc.model").uppercase()
-        }
-        val platform = getSystemProperty("ro.board.platform").lowercase()
+        if (!isQualcomm) return@lazy false
 
-        val detected = if (!isQualcomm) {
-            false
-        } else {
-            // Known platform codenames with Hexagon HTP
-            val htpPlatforms = setOf(
-                "pineapple", "kalama", "taro", "cape", "cliffs",
-                "sun", "lahaina", "yupik", "waipio"
-            )
-            if (htpPlatforms.contains(platform) || htpPlatforms.contains(board)) {
-                true
-            } else {
-                // Regex for HTP chipsets:
-                // SM8350, SM8450, SM8475, SM8550, SM8650, SM8635, SM8750... (SM83xx+)
-                // SM7325, SM7450, SM7475, SM7550, SM7675... (SM73xx+)
-                // SC8380XP... (Snapdragon X Elite)
-                // Does NOT match SM7150 (732G), SM7250 (765G), SM8250 (865), SM8150 (855), SM6xxx, etc.
-                val htpSocRegex = Regex("""^S[MC][78][3-9]\d\d.*""", RegexOption.IGNORE_CASE)
-                socModel.isNotEmpty() && htpSocRegex.matches(socModel)
-            }
-        }
-
-        Log.i(
-            TAG,
-            "Hardware check: isQualcomm=$isQualcomm, socModel='$socModel', platform='$platform', board='$board', hardware='$hardware' -> isHexagonHtp=$detected"
+        // Check the standard API and fallback vendor properties
+        val candidateProperties = listOfNotNull(
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) Build.SOC_MODEL else null,
+            getSystemProperty("ro.soc.model"),
+            getSystemProperty("ro.vendor.qti.soc_model"),
+            getSystemProperty("ro.hardware.chipname"),
+            getSystemProperty("ro.chipname"),
+            Build.BOARD,
+            Build.HARDWARE
         )
+
+        val detected = candidateProperties.any { value ->
+            value.isNotEmpty() && HTP_SOC_REGEX.containsMatchIn(value)
+        }
+
+        Log.i(TAG, "Hardware check: isQualcomm=$isQualcomm -> isHexagonHtp=$detected")
         detected
     }
 }
