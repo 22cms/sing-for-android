@@ -724,6 +724,44 @@ object ModelLoader {
         get() = minOf(6, maxOf(2, Runtime.getRuntime().availableProcessors() - 2))
 
     private var currentBackend: InferenceBackend? = null
+    var currentQnnMode: String = ""
+        private set
+    internal var currentRuntimeVariant: OnnxRuntimeVariant? = null
+        private set
+
+    val isFallbackActive: Boolean
+        get() {
+            if (currentTarget == SingSettings.TARGET_NPU) {
+                return !activeProviderShort.contains("HTP", ignoreCase = true) && !activeProviderShort.contains("NPU", ignoreCase = true)
+            }
+            if (currentTarget == SingSettings.TARGET_GPU) {
+                return !activeProviderShort.contains("GPU", ignoreCase = true) && !activeProviderShort.contains("OpenCL", ignoreCase = true) && !activeProviderShort.contains("Vulkan", ignoreCase = true)
+            }
+            if (currentTarget == SingSettings.TARGET_NNAPI) {
+                return !activeProviderShort.contains("NNAPI", ignoreCase = true)
+            }
+            return false
+        }
+
+    fun invalidateBackend() {
+        synchronized(backendCreationLock) {
+            val old = currentBackend
+            currentBackend = null
+            currentModelId = ""
+            currentTarget = ""
+            currentThreadCount = 0
+            currentQnnMode = ""
+            currentRuntimeVariant = null
+            if (old != null) {
+                sessionCloser.schedule({
+                    try {
+                        old.close()
+                    } catch (_: Throwable) {}
+                }, 1, java.util.concurrent.TimeUnit.SECONDS)
+            }
+        }
+    }
+
     private val backendCreationLock = Any()
     private val catalogLock = Any()
     private val nativeLibsLock = Any()
@@ -743,11 +781,17 @@ object ModelLoader {
             return null
         }
 
+        val qnnMode = SingSettings.getQnnUnmappedSocMode(context)
+        val runtimeVariant = NativeLibDownloader.runtimeVariant(context)
+
         val cachedBackend = currentBackend
         if (cachedBackend != null &&
             (hardwareTarget == SingSettings.TARGET_NPU || currentThreadCount == targetThreads) &&
             currentTarget == hardwareTarget &&
-            currentModelId == modelInfo.id
+            currentModelId == modelInfo.id &&
+            currentQnnMode == qnnMode &&
+            currentRuntimeVariant == runtimeVariant &&
+            !isFallbackActive
         ) {
             return cachedBackend
         }
@@ -756,7 +800,10 @@ object ModelLoader {
             if (currentBackend != null &&
                 (hardwareTarget == SingSettings.TARGET_NPU || currentThreadCount == targetThreads) &&
                 currentTarget == hardwareTarget &&
-                currentModelId == modelInfo.id
+                currentModelId == modelInfo.id &&
+                currentQnnMode == qnnMode &&
+                currentRuntimeVariant == runtimeVariant &&
+                !isFallbackActive
             ) {
                 return currentBackend!!
             }
@@ -807,6 +854,8 @@ object ModelLoader {
             currentThreadCount = targetThreads
             currentTarget = hardwareTarget
             currentModelId = modelInfo.id
+            currentQnnMode = qnnMode
+            currentRuntimeVariant = runtimeVariant
 
             if (oldBackend != null && oldBackend !== backend) {
                 sessionCloser.schedule({

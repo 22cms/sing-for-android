@@ -27,6 +27,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontStyle
@@ -41,6 +42,8 @@ import org.francasio.sing.ui.components.SectionHeader
 import org.francasio.sing.ui.theme.*
 import org.francasio.sing.util.DeviceHelper
 import org.francasio.sing.util.ModelLoader
+import org.francasio.sing.util.NativeLibDownloader
+import org.francasio.sing.util.OnnxRuntimeVariant
 
 @OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
@@ -56,6 +59,7 @@ fun PipelineDetailsCard(
     modifier: Modifier = Modifier
 ) {
     val isMaterialYou = LocalIsMaterialYou.current
+    val context = LocalContext.current
 
     Column(modifier = modifier.fillMaxWidth()) {
         SectionHeader(title = stringResource(id = R.string.title_engine_details))
@@ -194,13 +198,15 @@ fun PipelineDetailsCard(
                 Spacer(modifier = Modifier.height(12.dp))
 
                 // Technical readout specs
+                val isQnn = NativeLibDownloader.runtimeVariant(context) == OnnxRuntimeVariant.QNN
+                val neuralEngineText = when {
+                    currentModel?.isViNNet == true -> "Native Vi-NNet (NEON C++)"
+                    isOnnxModel -> if (isQnn) "ONNX Runtime QNN v1.29" else "ONNX Runtime v1.30"
+                    else -> "Alibaba MNN v3.6.1"
+                }
                 PipelineSpecRow(
                     label = stringResource(id = R.string.label_neural_engine),
-                    value = when {
-                        currentModel?.isViNNet == true -> "Native Vi-NNet (NEON C++)"
-                        isOnnxModel -> "ONNX Runtime QNN v1.29"
-                        else -> "Alibaba MNN v3.6.1"
-                    }
+                    value = neuralEngineText
                 )
                 // The NPU/HTP backends force FP16 execution. Libraries do not report
                 // on-the-fly quantization, so we infer it from an FP32 model running
@@ -217,28 +223,39 @@ fun PipelineDetailsCard(
                     valueColor = if (precisionConverted) DefaultYellowError else TextPrimary
                 )
 
-                val isHardwareFallback = remember(hardwareTarget, activeProvider, isViNNetModel) {
-                    if (isViNNetModel) {
-                        false
-                    } else if (activeProvider.isNotBlank()) {
-                        when (hardwareTarget) {
-                            SingSettings.TARGET_NPU -> !activeProvider.contains("HTP", ignoreCase = true) && !activeProvider.contains("NPU", ignoreCase = true)
-                            SingSettings.TARGET_GPU -> !activeProvider.contains("GPU", ignoreCase = true) && !activeProvider.contains("OpenCL", ignoreCase = true) && !activeProvider.contains("Vulkan", ignoreCase = true)
-                            SingSettings.TARGET_NNAPI -> !activeProvider.contains("NNAPI", ignoreCase = true)
-                            else -> false
-                        }
-                    } else hardwareTarget == SingSettings.TARGET_NPU && !DeviceHelper.isQualcommWithHexagonHtp
+                val hasBenchResult = benchmarkState.result?.provider?.isNotBlank() == true
+                val benchProvider = benchmarkState.result?.provider ?: ""
+                val effectiveProvider = if (hasBenchResult) benchProvider else activeProvider
+                val hasProviderInfo = effectiveProvider.isNotBlank()
+
+                val runtimeVariant = NativeLibDownloader.runtimeVariant(context)
+                val isQnnReady = DeviceHelper.isQualcommWithHexagonHtp &&
+                        (runtimeVariant == OnnxRuntimeVariant.QNN || NativeLibDownloader.isQnnRuntimeInstalled(context))
+
+                val isHardwareFallback = if (isViNNetModel) {
+                    false
+                } else if (hasProviderInfo) {
+                    when (hardwareTarget) {
+                        SingSettings.TARGET_NPU -> !effectiveProvider.contains("HTP", ignoreCase = true) && !effectiveProvider.contains("NPU", ignoreCase = true)
+                        SingSettings.TARGET_GPU -> !effectiveProvider.contains("GPU", ignoreCase = true) && !effectiveProvider.contains("OpenCL", ignoreCase = true) && !effectiveProvider.contains("Vulkan", ignoreCase = true)
+                        SingSettings.TARGET_NNAPI -> !effectiveProvider.contains("NNAPI", ignoreCase = true)
+                        else -> false
+                    }
+                } else {
+                    when (hardwareTarget) {
+                        SingSettings.TARGET_NPU -> !isQnnReady
+                        else -> false
+                    }
                 }
 
-                val actualHardwareDisplay = remember(hardwareTarget, activeProvider, isHardwareFallback, isViNNetModel) {
-                    if (isViNNetModel) {
-                        "CPU (required by Vi-NNet)"
-                    } else if (isHardwareFallback) {
+                val actualHardwareDisplay = if (isViNNetModel) {
+                    "CPU (required by Vi-NNet)"
+                } else if (hasProviderInfo) {
+                    if (isHardwareFallback) {
                         val fallbackTarget = when {
-                            activeProvider.contains("CPU", ignoreCase = true) || activeProvider.contains("XNNPACK", ignoreCase = true) -> "CPU"
-                            activeProvider.contains("GPU", ignoreCase = true) || activeProvider.contains("OpenCL", ignoreCase = true) || activeProvider.contains("Vulkan", ignoreCase = true) -> "GPU"
-                            activeProvider.isNotBlank() -> activeProvider
-                            else -> "CPU"
+                            effectiveProvider.contains("CPU", ignoreCase = true) || effectiveProvider.contains("XNNPACK", ignoreCase = true) -> "CPU"
+                            effectiveProvider.contains("GPU", ignoreCase = true) || effectiveProvider.contains("OpenCL", ignoreCase = true) || effectiveProvider.contains("Vulkan", ignoreCase = true) -> "GPU"
+                            else -> effectiveProvider
                         }
                         val requested = when (hardwareTarget) {
                             SingSettings.TARGET_NPU -> "NPU"
@@ -247,15 +264,23 @@ fun PipelineDetailsCard(
                             else -> hardwareTarget
                         }
                         "$fallbackTarget (Fallback from $requested)"
-                    } else if (activeProvider.isNotBlank()) {
-                        activeProvider
                     } else {
-                        when (hardwareTarget) {
-                            SingSettings.TARGET_NPU -> "Qualcomm Hexagon HTP NPU"
-                            SingSettings.TARGET_GPU -> "OpenCL Mobile GPU"
-                            SingSettings.TARGET_NNAPI -> "Android NNAPI"
-                            else -> "Multi-threaded CPU"
-                        }
+                        effectiveProvider
+                    }
+                } else if (isHardwareFallback) {
+                    val requested = when (hardwareTarget) {
+                        SingSettings.TARGET_NPU -> "NPU"
+                        SingSettings.TARGET_GPU -> "GPU"
+                        SingSettings.TARGET_NNAPI -> "NNAPI"
+                        else -> hardwareTarget
+                    }
+                    "CPU (Fallback from $requested)"
+                } else {
+                    when (hardwareTarget) {
+                        SingSettings.TARGET_NPU -> "Qualcomm Hexagon HTP NPU"
+                        SingSettings.TARGET_GPU -> "OpenCL Mobile GPU"
+                        SingSettings.TARGET_NNAPI -> "Android NNAPI"
+                        else -> "Multi-threaded CPU"
                     }
                 }
 

@@ -84,6 +84,7 @@ class MainActivity : ComponentActivity() {
     private val hardwareTargetState = mutableStateOf(SingSettings.TARGET_NPU)
     private val threadCountState = mutableIntStateOf(4)
     private val materialYouState = mutableStateOf(true)
+    private val qnnUnmappedSocModeState = mutableStateOf("")
     private val benchmarkState = mutableStateOf(BenchmarkUiState())
     private val isModuleVersionMismatchState = mutableStateOf(false)
     private val appVersionState = mutableStateOf("")
@@ -109,6 +110,7 @@ class MainActivity : ComponentActivity() {
         hardwareTargetState.value = SingSettings.hardwareTarget
         threadCountState.intValue = SingSettings.threadCount.coerceIn(1, 12)
         materialYouState.value = SingSettings.materialYou
+        qnnUnmappedSocModeState.value = SingSettings.qnnUnmappedSocMode
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -141,6 +143,7 @@ class MainActivity : ComponentActivity() {
 
         SingSettings.loadLocal(this)
         ModelLoader.loadModels(this)
+        SingSettings.onLocalSettingsChanged = { runOnUiThread { syncUiStatesWithSettings() } }
         syncUiStatesWithSettings()
         bgExecutor.execute {
             SingSettings.updateHasDownloadedModels(this)

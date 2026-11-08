@@ -4,6 +4,7 @@ import android.content.Context
 import android.util.Log
 import org.francasio.sing.provider.SingSettings
 import org.francasio.sing.util.ModelLoader
+import org.francasio.sing.util.NativeLibDownloader
 import org.francasio.sing.util.ReflectionUtils
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
@@ -154,8 +155,16 @@ class SingAudioProcessor(
         val selectedModel = SingSettings.selectedModelId
         val threads = SingSettings.threadCount
         val target = SingSettings.hardwareTarget
-        if (ModelLoader.currentModelId != selectedModel || ModelLoader.currentTarget != target ||
-            (target != SingSettings.TARGET_NPU && ModelLoader.threadCount != threads)) {
+        val qnnMode = SingSettings.getQnnUnmappedSocMode(context)
+        val variant = NativeLibDownloader.runtimeVariant(context)
+        val needsRecreation = ModelLoader.currentModelId != selectedModel ||
+            ModelLoader.currentTarget != target ||
+            ModelLoader.currentQnnMode != qnnMode ||
+            ModelLoader.currentRuntimeVariant != variant ||
+            (target == SingSettings.TARGET_NPU && ModelLoader.isFallbackActive) ||
+            (target != SingSettings.TARGET_NPU && ModelLoader.threadCount != threads)
+
+        if (needsRecreation) {
             isEngineReady = false
         }
         bgExecutor.execute {
