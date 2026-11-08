@@ -141,4 +141,12 @@
     <string name="info_third_party_title">Third-Party &amp; Open Source Projects</string>
     <string name="show_more">Show more</string>
     <string name="show_less">Show less</string>
+
+    <!-- Qualcomm QNN Unmapped SoC Setup -->
+    <string name="title_qnn_unmapped_soc">Unknown Qualcomm SoC</string>
+    <string name="desc_qnn_unmapped_soc">Your Qualcomm processor appears to support Hexagon NPU hardware acceleration, but its specific model wasn\'t recognized.\n\nYou can try downloading ONNX Runtime with full NPU support (includes all hardware profiles for maximum compatibility), or play it safe and use the standard CPU version instead.</string>
+    <string name="btn_qnn_try_all_skeletons">Try NPU Acceleration</string>
+    <string name="btn_qnn_standard_ort">Use Standard CPU</string>
+    <string name="btn_cancel">Cancel</string>
+
 </resources>

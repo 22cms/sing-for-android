@@ -18,10 +18,21 @@ object NativeLibDownloader {
     private const val MAVEN_BASE = "https://repo1.maven.org/maven2"
     private const val ORT_CACHE_ID_FILE = "ort-runtime-id"
 
-    private fun runtimeVariant(): OnnxRuntimeVariant = OnnxRuntimeVariant.select(
-        android.os.Build.SUPPORTED_ABIS.firstOrNull() ?: "arm64-v8a",
-        DeviceHelper.isQualcommWithHexagonHtp
-    )
+    internal fun runtimeVariant(context: Context): OnnxRuntimeVariant {
+        val abi = android.os.Build.SUPPORTED_ABIS.firstOrNull() ?: "arm64-v8a"
+        if (!abi.startsWith("arm64") || !DeviceHelper.isQualcommWithHexagonHtp) {
+            return OnnxRuntimeVariant.STANDARD
+        }
+        if (requiredSkeleton(context) != null) {
+            return OnnxRuntimeVariant.QNN
+        }
+        val mode = org.francasio.sing.provider.SingSettings.getQnnUnmappedSocMode(context)
+        return if (mode == org.francasio.sing.provider.SingSettings.QNN_UNMAPPED_ALL_SKELETONS) {
+            OnnxRuntimeVariant.QNN
+        } else {
+            OnnxRuntimeVariant.STANDARD
+        }
+    }
 
     private fun runtimeCacheId(variant: OnnxRuntimeVariant): String = when (variant) {
         OnnxRuntimeVariant.QNN -> "qnn-$ONNX_RUNTIME_VERSION"
@@ -63,9 +74,10 @@ object NativeLibDownloader {
         } catch (_: Throwable) {
             return false
         }
-        if (cachedId != runtimeCacheId(runtimeVariant())) return false
+        if (cachedId != runtimeCacheId(runtimeVariant(context))) return false
         // Invalidate stale caches (e.g. arm64 libs left on an x86_64 device).
-        val wantMachine = if ((android.os.Build.SUPPORTED_ABIS.firstOrNull() ?: "").startsWith("arm64")) 0x00B7 else 0x003E
+        val wantMachine =
+            if ((android.os.Build.SUPPORTED_ABIS.firstOrNull() ?: "").startsWith("arm64")) 0x00B7 else 0x003E
         try {
             val buf = ByteArray(20)
             val bytesRead = ort.inputStream().use { it.read(buf) }
@@ -77,7 +89,8 @@ object NativeLibDownloader {
                     return false
                 }
             }
-        } catch (_: Throwable) {}
+        } catch (_: Throwable) {
+        }
         return true
     }
 
@@ -86,34 +99,92 @@ object NativeLibDownloader {
         return File(dir, "libQnnHtp.so").exists()
     }
 
+    fun mapSocToSkeleton(soc: String): String? {
+        val s = soc.uppercase()
+        return when {
+            // V68: Snapdragon 888 / 888+, 778G, 780G, 8cx Gen 3, and early Auto/IoT
+            s.startsWith("SM8350") || s.startsWith("SM7325") || s.startsWith("SM7350") ||
+                    s.startsWith("SM7315") || s.startsWith("SM8295") || s.startsWith("QCM6490") ||
+                    s.startsWith("QCS6490") || s.startsWith("SA8540") || s.startsWith("SC8280X") -> "V68"
+
+            // V69: Snapdragon 8 Gen 1, 8+ Gen 1, 7 Gen 1, 7+ Gen 2, XR2 Gen 2
+            s.startsWith("SM8450") || s.startsWith("SM8475") || s.startsWith("SM7475") ||
+                    s.startsWith("SM7450") || s.startsWith("SM7425") || s.startsWith("SXR2230P") ||
+                    s.startsWith("SXR2250P") -> "V69"
+
+            // V73: Snapdragon 8 Gen 2, 8s Gen 3, 7+ Gen 3, 7 Gen 3, 7s Gen 2/3, 6 Gen 1, X Elite (PC)
+            s.startsWith("SM8550") || s.startsWith("SM8635") ||
+                    s.startsWith("SM7675") || s.startsWith("SM7635") || s.startsWith("SM7550") ||
+                    s.startsWith("SM7435") || s.startsWith("SM6450") || s.startsWith("SC8380XP") ||
+                    s.startsWith("SAR2130P") || s.startsWith("SA8255") || s.startsWith("QCS9100") -> "V73"
+
+            // V75: Snapdragon 8 Gen 3 flagship, 8s Gen 4 & IoT equivalents
+            s.startsWith("SM8650") || s.startsWith("SM8735") || s.startsWith("QCS8625") ||
+                    s.startsWith("QCS8300") || s.startsWith("QCS8275") -> "V75"
+
+            // V79: Snapdragon 8 Elite / 8 Gen 4
+            s.startsWith("SM8750") || s.startsWith("SXR2330P") -> "V79"
+
+            // V81: Snapdragon 8 Elite Gen 5, 8s Elite, Snapdragon X2 Elite, Wear W6
+            s.startsWith("SM8850") || s.startsWith("SM8845") || s.startsWith("SC8480XP") ||
+                    s.startsWith("SW6100") || s.startsWith("SA8797") || s.startsWith("SAR2230P") -> "V81"
+
+            else -> null
+        }
+    }
+
+    val KNOWN_SKELETONS = setOf("V68", "V69", "V73", "V75", "V79", "V81")
+
+    fun isUnmappedQualcommHtp(context: Context): Boolean {
+        val abi = android.os.Build.SUPPORTED_ABIS.firstOrNull() ?: "arm64-v8a"
+        if (!abi.startsWith("arm64")) return false
+        return DeviceHelper.isQualcommWithHexagonHtp && requiredSkeleton(context) == null
+    }
+
     fun requiredSkeleton(context: Context): String? {
         val abi = android.os.Build.SUPPORTED_ABIS.firstOrNull() ?: "arm64-v8a"
         if (!abi.startsWith("arm64")) return null
-        var soc = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) {
-            android.os.Build.SOC_MODEL.uppercase()
-        } else {
-            ""
-        }
-        if (soc.isBlank() || soc == "UNKNOWN") {
-            try {
-                java.io.File("/proc/cpuinfo").readText().let { txt ->
-                    val m = Regex("SM\\d{4}").find(txt)
-                    if (m != null) soc = m.value.uppercase()
+
+        // 1. First priority: Direct FastRPC query to CDSP for HEXAGON_CPU_ARCH
+        try {
+            val rpcArch = NativeEnv.detectHexagonArch()
+            if (!rpcArch.isNullOrBlank()) {
+                if (rpcArch in KNOWN_SKELETONS) {
+                    Log.i(TAG, "FastRPC detected known Hexagon architecture: $rpcArch")
+                    return rpcArch
+                } else {
+                    Log.w(TAG, "FastRPC returned Hexagon architecture $rpcArch not present in known map")
+                    return null // Triggers unknown Qualcomm SoC pop-up
                 }
-            } catch (_: Throwable) {}
+            }
+        } catch (t: Throwable) {
+            Log.w(TAG, "FastRPC architecture detection failed: ${t.message}")
         }
-        if (soc.isBlank()) {
-            soc = android.os.Build.HARDWARE.uppercase()
+
+        // 2. Fallback: Fixed SoC string mapping table
+        for (candidate in DeviceHelper.getSocCandidates()) {
+            val skel = mapSocToSkeleton(candidate)
+            if (skel != null) {
+                Log.i(TAG, "Mapped SoC candidate '$candidate' to skeleton $skel (fallback)")
+                return skel
+            }
         }
-        return when {
-            soc.startsWith("SM8350") || soc.startsWith("SM8295") || soc.startsWith("QCM6490") || soc.startsWith("QCS6490") || soc.startsWith("SA8540") -> "V68"
-            soc.startsWith("SM8450") || soc.startsWith("SM8475") || soc.startsWith("SXR2230P") -> "V69"
-            soc.startsWith("SM8550") || soc.startsWith("SM8635") || soc.startsWith("SM7675") || soc.startsWith("SM8650") == false && soc.startsWith("SM86") -> "V73"
-            soc.startsWith("SM8650") -> "V75"
-            soc.startsWith("SM8750") || soc.startsWith("SXR2330P") -> "V79"
-            soc.startsWith("SM8845") || soc.startsWith("SM8850") || soc.startsWith("SC8480XP") || soc.startsWith("SW6100") || soc.startsWith("SA8797") || soc.startsWith("SAR2230P") -> "V81"
-            else -> null
+
+        try {
+            java.io.File("/proc/cpuinfo").readText().let { txt ->
+                val m = Regex("SM\\d{4}").find(txt)
+                if (m != null) {
+                    val skel = mapSocToSkeleton(m.value)
+                    if (skel != null) {
+                        Log.i(TAG, "Mapped /proc/cpuinfo '${m.value}' to skeleton $skel (fallback)")
+                        return skel
+                    }
+                }
+            }
+        } catch (_: Throwable) {
         }
+
+        return null
     }
 
     private fun downloadFile(url: String, dest: File, onProgress: (Float) -> Unit): Boolean {
@@ -162,7 +233,12 @@ object NativeLibDownloader {
         }
     }
 
-    private fun extractEntries(aarFile: File, destDir: File, wanted: Set<String>): Set<String> {
+    private fun extractEntries(
+        aarFile: File,
+        destDir: File,
+        wanted: Set<String>,
+        extractAllSkeletons: Boolean = false
+    ): Set<String> {
         val extracted = mutableSetOf<String>()
         ZipFile(aarFile).use { zip ->
             val entries = zip.entries()
@@ -170,10 +246,14 @@ object NativeLibDownloader {
                 val e = entries.nextElement()
                 if (e.isDirectory) continue
                 val name = e.name.substringAfterLast('/')
-                if (name !in wanted) continue
+                val isSkelOrStub = extractAllSkeletons &&
+                        name.startsWith("libQnnHtpV") &&
+                        (name.endsWith("Stub.so") || name.endsWith("Skel.so"))
+                if (name !in wanted && !isSkelOrStub) continue
                 val abi = e.name.substringAfter("jni/").substringBefore('/')
                 val wantAbi = android.os.Build.SUPPORTED_ABIS.firstOrNull() ?: "arm64-v8a"
-                val wantAbiName = if (wantAbi.startsWith("arm64")) "arm64-v8a" else if (wantAbi.startsWith("x86_64")) "x86_64" else wantAbi
+                val wantAbiName =
+                    if (wantAbi.startsWith("arm64")) "arm64-v8a" else if (wantAbi.startsWith("x86_64")) "x86_64" else wantAbi
                 if (abi != wantAbiName) continue
                 val outFile = File(destDir, name)
                 zip.getInputStream(e).use { input ->
@@ -199,7 +279,7 @@ object NativeLibDownloader {
     fun downloadOnnxRuntime(context: Context, onProgress: (String, Float) -> Unit): Boolean {
         currentLabel = safeGetString(context, R.string.downloading_onnx_runtime, "Downloading ONNX Runtime...")
         val dir = getLibsDir(context)
-        val variant = runtimeVariant()
+        val variant = runtimeVariant(context)
         val (url, tmpName) = if (variant == OnnxRuntimeVariant.QNN) {
             ONNX_AAR_URL to "onnxruntime-android-qnn.aar.tmp"
         } else {
@@ -226,6 +306,9 @@ object NativeLibDownloader {
             currentLabel = ""
             return false
         }
+        if (variant == OnnxRuntimeVariant.STANDARD) {
+            dir.listFiles { _, name -> name.startsWith("libQnn") }?.forEach { it.delete() }
+        }
         File(dir, ORT_CACHE_ID_FILE).writeText(runtimeCacheId(variant))
         currentProgress = 1f
         onProgress(currentLabel, currentProgress)
@@ -234,7 +317,12 @@ object NativeLibDownloader {
     }
 
     fun downloadQnnRuntime(context: Context, onProgress: (String, Float) -> Unit): Boolean {
-        val skeleton = requiredSkeleton(context) ?: return false
+        val skeleton = requiredSkeleton(context)
+        val isAllSkeletons = skeleton == null &&
+                org.francasio.sing.provider.SingSettings.getQnnUnmappedSocMode(context) ==
+                org.francasio.sing.provider.SingSettings.QNN_UNMAPPED_ALL_SKELETONS
+        if (skeleton == null && !isAllSkeletons) return false
+
         currentLabel = safeGetString(context, R.string.downloading_qnn_accelerator, "Downloading QNN Accelerator...")
         val dir = getLibsDir(context)
         val tmpAar = File(context.cacheDir, "qnn-runtime.aar.tmp")
@@ -257,9 +345,11 @@ object NativeLibDownloader {
             "vendor.qti.hardware.dsp@1.0.so", "libcdsprpc.so",
             "libQnnSystem.so", "libQnnHtp.so", "libQnnHtpPrepare.so"
         )
-        wanted.add("libQnnHtp${skeleton}Stub.so")
-        wanted.add("libQnnHtp${skeleton}Skel.so")
-        extractEntries(tmpAar, dir, wanted)
+        if (skeleton != null) {
+            wanted.add("libQnnHtp${skeleton}Stub.so")
+            wanted.add("libQnnHtp${skeleton}Skel.so")
+        }
+        extractEntries(tmpAar, dir, wanted, extractAllSkeletons = isAllSkeletons)
         // libdl_android.so fallback: if the real one failed to extract, the stub covers it
         if (!File(dir, "libdl_android.so").exists() && File(dir, "libdl_android_stub.so").exists()) {
             File(dir, "libdl_android_stub.so").copyTo(File(dir, "libdl_android.so"), overwrite = true)
@@ -275,10 +365,8 @@ object NativeLibDownloader {
         if (!isOnnxRuntimeInstalled(context)) {
             if (!downloadOnnxRuntime(context, onProgress)) return false
         }
-        if (DeviceHelper.isQualcommWithHexagonHtp && !isQnnRuntimeInstalled(context)) {
-            if (requiredSkeleton(context) != null) {
-                if (!downloadQnnRuntime(context, onProgress)) return false
-            }
+        if (runtimeVariant(context) == OnnxRuntimeVariant.QNN && !isQnnRuntimeInstalled(context)) {
+            if (!downloadQnnRuntime(context, onProgress)) return false
         }
         return true
     }

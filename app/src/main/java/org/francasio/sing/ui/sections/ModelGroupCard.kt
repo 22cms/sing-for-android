@@ -24,6 +24,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.outlined.Check
 import androidx.compose.material.icons.outlined.Delete
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -38,6 +39,7 @@ import androidx.compose.material3.RadioButtonDefaults
 import androidx.compose.material3.SecondaryTabRow
 import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -430,6 +432,101 @@ private fun ModelVersionRow(
     val isPrecisionPreferred = modelInfo.precision.equals("fp16", ignoreCase = true) ||
             modelInfo.precisionBadge.equals("FP16", ignoreCase = true)
 
+    var showQnnUnmappedDialog by remember { mutableStateOf(false) }
+
+    fun requestDownload() {
+        val isUnmappedOnnx = modelInfo.engine.equals(SingSettings.ENGINE_ONNX, ignoreCase = true) &&
+                NativeLibDownloader.isUnmappedQualcommHtp(context) &&
+                (!NativeLibDownloader.isOnnxRuntimeInstalled(context) || SingSettings.getQnnUnmappedSocMode(context).isEmpty())
+        if (isUnmappedOnnx) {
+            showQnnUnmappedDialog = true
+        } else {
+            ModelDownloader.startDownload(context, modelInfo) {
+                onSelect()
+            }
+        }
+    }
+
+    if (showQnnUnmappedDialog) {
+        AlertDialog(
+            onDismissRequest = { showQnnUnmappedDialog = false },
+            title = {
+                Text(
+                    text = stringResource(id = R.string.title_qnn_unmapped_soc),
+                    color = TextPrimary,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 18.sp
+                )
+            },
+            text = {
+                Text(
+                    text = stringResource(id = R.string.desc_qnn_unmapped_soc),
+                    color = TextSecondary,
+                    fontSize = 14.sp,
+                    lineHeight = 20.sp
+                )
+            },
+            confirmButton = {
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                    horizontalAlignment = Alignment.End
+                ) {
+                    Button(
+                        onClick = {
+                            SingSettings.setQnnUnmappedSocMode(context, SingSettings.QNN_UNMAPPED_ALL_SKELETONS)
+                            showQnnUnmappedDialog = false
+                            ModelDownloader.startDownload(context, modelInfo) {
+                                onSelect()
+                            }
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = Primary,
+                            contentColor = if (LocalIsMaterialYou.current) Accent2_900 else Color.White
+                        )
+                    ) {
+                        Text(
+                            text = stringResource(id = R.string.btn_qnn_try_all_skeletons),
+                            fontWeight = FontWeight.SemiBold
+                        )
+                    }
+                    Button(
+                        onClick = {
+                            SingSettings.setQnnUnmappedSocMode(context, SingSettings.QNN_UNMAPPED_STANDARD_ORT)
+                            showQnnUnmappedDialog = false
+                            ModelDownloader.startDownload(context, modelInfo) {
+                                onSelect()
+                            }
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = Primary.copy(alpha = 0.16f),
+                            contentColor = Primary
+                        )
+                    ) {
+                        Text(
+                            text = stringResource(id = R.string.btn_qnn_standard_ort),
+                            fontWeight = FontWeight.SemiBold
+                        )
+                    }
+                    TextButton(
+                        onClick = { showQnnUnmappedDialog = false },
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text(
+                            text = stringResource(id = R.string.btn_cancel),
+                            color = TextSecondary
+                        )
+                    }
+                }
+            },
+            dismissButton = null,
+            containerColor = CardDark,
+            shape = RoundedCornerShape(20.dp)
+        )
+    }
+
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -442,9 +539,7 @@ private fun ModelVersionRow(
                 if (isDownloaded) {
                     onSelect()
                 } else {
-                    ModelDownloader.startDownload(context, modelInfo) {
-                        onSelect()
-                    }
+                    requestDownload()
                 }
             }
             .padding(horizontal = 18.dp, vertical = 14.dp)
@@ -460,9 +555,7 @@ private fun ModelVersionRow(
                     if (isDownloaded) {
                         onSelect()
                     } else {
-                        ModelDownloader.startDownload(context, modelInfo) {
-                            onSelect()
-                        }
+                        requestDownload()
                     }
                 },
                 enabled = isDownloaded && !isDownloading,
@@ -617,9 +710,7 @@ private fun ModelVersionRow(
                 Spacer(modifier = Modifier.height(10.dp))
                 Button(
                     onClick = {
-                        ModelDownloader.startDownload(context, modelInfo) {
-                            onSelect()
-                        }
+                        requestDownload()
                     },
                     shape = RoundedCornerShape(18.dp),
                     colors = ButtonDefaults.buttonColors(

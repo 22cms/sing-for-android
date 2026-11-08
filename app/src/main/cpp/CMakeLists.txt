@@ -42,6 +42,7 @@ add_library(sing_dsp SHARED
     vr_dsp_engine.cpp
     jni_bridge.cpp
     vinet_jni.cpp
+    fastrpc_jni.cpp
     ${MNN_BRIDGE}
 )
 

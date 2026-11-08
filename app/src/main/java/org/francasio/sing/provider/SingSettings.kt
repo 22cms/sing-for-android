@@ -35,6 +35,9 @@ object SingSettings {
     const val KEY_FORCE_SONG_ELIGIBILITY = "force_song_eligibility"
     const val KEY_MATERIAL_YOU = "material_you"
     const val KEY_BACK_TIP_LEARNED = "back_tip_learned"
+    const val KEY_QNN_UNMAPPED_SOC_MODE = "qnn_unmapped_soc_mode"
+    const val QNN_UNMAPPED_ALL_SKELETONS = "all_skeletons"
+    const val QNN_UNMAPPED_STANDARD_ORT = "standard_ort"
     var isDebugOverride: Boolean? = null
 
     fun isDebug(context: Context?): Boolean {
@@ -162,6 +165,28 @@ object SingSettings {
         lastHeartbeatManager = prefs.getString(KEY_HEARTBEAT_MANAGER, null)
         moduleVersion = prefs.getString(KEY_HEARTBEAT_ENGINE_VERSION, null)
         activeProvider = prefs.getString(KEY_ACTIVE_PROVIDER, "") ?: ""
+        qnnUnmappedSocMode = prefs.getString(KEY_QNN_UNMAPPED_SOC_MODE, "") ?: ""
+    }
+
+    @Volatile
+    var qnnUnmappedSocMode: String = ""
+
+    fun getQnnUnmappedSocMode(context: Context?): String {
+        if (qnnUnmappedSocMode.isNotEmpty()) return qnnUnmappedSocMode
+        if (context == null) return qnnUnmappedSocMode
+        val prefsName = if (context.packageName == "org.francasio.sing") PREFS_MODULE else PREFS_CACHE
+        val prefs = context.getSharedPreferences(prefsName, Context.MODE_PRIVATE)
+        val value = prefs.getString(KEY_QNN_UNMAPPED_SOC_MODE, "") ?: ""
+        qnnUnmappedSocMode = value
+        return value
+    }
+
+    fun setQnnUnmappedSocMode(context: Context, mode: String) {
+        qnnUnmappedSocMode = mode
+        val prefsName = if (context.packageName == "org.francasio.sing") PREFS_MODULE else PREFS_CACHE
+        val prefs = context.getSharedPreferences(prefsName, Context.MODE_PRIVATE)
+        prefs.edit().putString(KEY_QNN_UNMAPPED_SOC_MODE, mode).apply()
+        broadcastSettings(context)
     }
 
     const val KEY_ACTIVE_PROVIDER = "active_provider"
@@ -328,6 +353,7 @@ object SingSettings {
             putExtra(KEY_SELECTED_MODEL, selectedModelId)
             putExtra(KEY_ALLOW_ZERO_FLOOR, allowZeroFloor)
             putExtra(KEY_FORCE_SONG_ELIGIBILITY, forceSongEligibility)
+            putExtra(KEY_QNN_UNMAPPED_SOC_MODE, qnnUnmappedSocMode)
             putExtra("module_apk_path", context.applicationInfo.sourceDir)
             if (modelInfo != null) {
                 putExtra("model_target_stem", modelInfo.targetStem)
@@ -397,6 +423,7 @@ object SingSettings {
                 }
                 allowZeroFloor = bundle.getBoolean(KEY_ALLOW_ZERO_FLOOR, allowZeroFloor)
                 forceSongEligibility = bundle.getBoolean(KEY_FORCE_SONG_ELIGIBILITY, forceSongEligibility)
+                qnnUnmappedSocMode = bundle.getString(KEY_QNN_UNMAPPED_SOC_MODE, qnnUnmappedSocMode)
 
                 val apkPath = bundle.getString("module_apk_path")
                 if (!apkPath.isNullOrBlank() && java.io.File(apkPath).exists()) {
@@ -420,6 +447,7 @@ object SingSettings {
                         .putString(KEY_SELECTED_MODEL, selectedModelId)
                         .putBoolean(KEY_ALLOW_ZERO_FLOOR, allowZeroFloor)
                         .putBoolean(KEY_FORCE_SONG_ELIGIBILITY, forceSongEligibility)
+                        .putString(KEY_QNN_UNMAPPED_SOC_MODE, qnnUnmappedSocMode)
                         .apply()
                 } catch (_: Throwable) {}
 
@@ -525,6 +553,7 @@ object SingSettings {
             selectedModelId = sanitizeModelId(prefs.getString(KEY_SELECTED_MODEL, DEFAULT_MODEL_ID))
             allowZeroFloor = prefs.getBoolean(KEY_ALLOW_ZERO_FLOOR, false)
             forceSongEligibility = prefs.getBoolean(KEY_FORCE_SONG_ELIGIBILITY, false)
+            qnnUnmappedSocMode = prefs.getString(KEY_QNN_UNMAPPED_SOC_MODE, "") ?: ""
             Log.i(TAG, "Loaded cached settings: preserveSide=$preserveSide, twoWaySlider=$twoWaySlider, threads=$threadCount, ecoMode=$ecoMode, target=$hardwareTarget (forceCpu=$forceCpu), model=$selectedModelId, allowZeroFloor=$allowZeroFloor, forceSongEligibility=$forceSongEligibility")
         } catch (t: Throwable) {
             Log.w(TAG, "Could not load cached settings: ${t.message}")

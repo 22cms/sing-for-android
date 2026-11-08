@@ -46,6 +46,17 @@ object DeviceHelper {
         }
     }
 
+    fun getSocCandidates(): List<String> = listOfNotNull(
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) Build.SOC_MODEL else null,
+        getSystemProperty("ro.soc.model"),
+        getSystemProperty("ro.vendor.qti.soc_model"),
+        getSystemProperty("ro.board.platform"),
+        getSystemProperty("ro.hardware.chipname"),
+        getSystemProperty("ro.chipname"),
+        Build.BOARD,
+        Build.HARDWARE
+    ).map { it.trim() }.filter { it.isNotEmpty() }
+
     val isQualcommWithHexagonHtp: Boolean by lazy {
         val hardware = Build.HARDWARE.lowercase()
         val board = Build.BOARD.lowercase()
@@ -63,19 +74,8 @@ object DeviceHelper {
 
         if (!isQualcomm) return@lazy false
 
-        val candidateStrings = listOfNotNull(
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) Build.SOC_MODEL else null,
-            getSystemProperty("ro.soc.model"),
-            getSystemProperty("ro.vendor.qti.soc_model"),
-            getSystemProperty("ro.board.platform"),   
-            getSystemProperty("ro.hardware.chipname"),
-            getSystemProperty("ro.chipname"),
-            Build.BOARD,
-            Build.HARDWARE
-        )
-
-        val detected = candidateStrings.any { candidate ->
-            candidate.isNotEmpty() && HTP_SOC_REGEX.containsMatchIn(candidate)
+        val detected = getSocCandidates().any { candidate ->
+            HTP_SOC_REGEX.containsMatchIn(candidate)
         }
 
         Log.i(TAG, "Hardware check: isQualcomm=$isQualcomm -> isHexagonHtp=$detected")

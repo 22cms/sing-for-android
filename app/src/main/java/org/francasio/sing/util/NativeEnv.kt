@@ -9,6 +9,13 @@ package org.francasio.sing.util
  * are located on the host filesystem and streamed to the DSP.
  */
 object NativeEnv {
+    init {
+        try {
+            System.loadLibrary("sing_dsp")
+        } catch (_: Throwable) {}
+    }
+
     external fun setenv(name: String, value: String): Boolean
     external fun chdir(path: String): Boolean
+    external fun detectHexagonArch(): String?
 }

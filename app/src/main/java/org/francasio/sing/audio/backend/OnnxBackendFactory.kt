@@ -110,11 +110,23 @@ object OnnxBackendFactory {
             }
             val targetDir = File(context.cacheDir, "ort_libs_$primaryAbi")
             targetDir.mkdirs()
-            if (DeviceHelper.isQualcommWithHexagonHtp && !NativeLibDownloader.isQnnRuntimeInstalled(context)) {
-                val skel = NativeLibDownloader.requiredSkeleton(context)
-                if (skel != null) {
-                    Log.i(TAG, "QNN runtime native libs missing - attempting download")
-                    NativeLibDownloader.downloadQnnRuntime(context, onProgress)
+            if (NativeLibDownloader.runtimeVariant(context) == org.francasio.sing.util.OnnxRuntimeVariant.QNN && !NativeLibDownloader.isQnnRuntimeInstalled(context)) {
+                Log.i(TAG, "QNN runtime native libs missing - attempting download")
+                NativeLibDownloader.downloadQnnRuntime(context, onProgress)
+            }
+            // If a specific skeleton is known, explicitly preload its matching stub.
+            // When all skeletons are extracted for an unmapped SoC, we do NOT load arbitrary
+            // stubs to prevent symbol collision; libQnnHtp.so will dlopen the correct stub via $ORIGIN.
+            val skel = NativeLibDownloader.requiredSkeleton(context)
+            if (skel != null) {
+                val stubFile = File(targetDir, "libQnnHtp${skel}Stub.so")
+                if (stubFile.exists()) {
+                    try {
+                        System.load(stubFile.absolutePath)
+                        Log.i(TAG, "Successfully loaded vendor stub library: ${stubFile.name}")
+                    } catch (t: Throwable) {
+                        Log.w(TAG, "Failed loading ${stubFile.name}: ${t.message}")
+                    }
                 }
             }
             val vendorLibs = listOf(
@@ -122,7 +134,7 @@ object OnnxBackendFactory {
                 "libdmabufheap.so", "libcutils.so", "libvndksupport.so", "libutils.so",
                 "libhardware.so", "libhidlbase.so", "libvmmem.so",
                 "vendor.qti.hardware.dsp@1.0.so", "libcdsprpc.so",
-                "libQnnSystem.so", "libQnnHtpV75Stub.so", "libQnnHtp.so"
+                "libQnnSystem.so", "libQnnHtp.so"
             )
             for (libName in vendorLibs) {
                 val candidates = if (libName == "libdl_android.so")
@@ -199,12 +211,9 @@ object OnnxBackendFactory {
                 Log.i(TAG, "ONNX Runtime native libs missing - attempting download")
                 NativeLibDownloader.downloadOnnxRuntime(context, onProgress)
             }
-            if (DeviceHelper.isQualcommWithHexagonHtp && !NativeLibDownloader.isQnnRuntimeInstalled(context)) {
-                val skel = NativeLibDownloader.requiredSkeleton(context)
-                if (skel != null) {
-                    Log.i(TAG, "QNN runtime native libs missing - attempting download")
-                    NativeLibDownloader.downloadQnnRuntime(context, onProgress)
-                }
+            if (NativeLibDownloader.runtimeVariant(context) == org.francasio.sing.util.OnnxRuntimeVariant.QNN && !NativeLibDownloader.isQnnRuntimeInstalled(context)) {
+                Log.i(TAG, "QNN runtime native libs missing - attempting download")
+                NativeLibDownloader.downloadQnnRuntime(context, onProgress)
             }
 
             // ONNX Runtime + QNN accelerator are downloaded from Maven by
@@ -212,6 +221,26 @@ object OnnxBackendFactory {
             // there is nothing to extract from it here. The previous extraction
             // loop only polluted the cache dir with libsing_dsp.so and friends.
             Log.i(TAG, "ONNX/QNN native libraries expected in ${targetDir.absolutePath} (downloaded on demand)")
+
+            // If a specific skeleton is known and targeted, explicitly preload its matching stub.
+            // When all skeletons are kept (e.g. forced QNN mode via unmapped SoC popup),
+            // bypass manual stub preloading entirely: libQnnHtp.so queries the DSP and dlopens
+            // the matching stub dynamically on its own.
+            val isAllSkeletonsMode = SingSettings.getQnnUnmappedSocMode(context) == SingSettings.QNN_UNMAPPED_ALL_SKELETONS
+            val skel = if (isAllSkeletonsMode) null else NativeLibDownloader.requiredSkeleton(context)
+            if (skel != null) {
+                val stubFile = File(targetDir, "libQnnHtp${skel}Stub.so")
+                if (stubFile.exists()) {
+                    try {
+                        System.load(stubFile.absolutePath)
+                        Log.i(TAG, "Successfully loaded stub library: ${stubFile.name}")
+                    } catch (t: Throwable) {
+                        Log.w(TAG, "Failed loading stub ${stubFile.name}: ${t.message}")
+                    }
+                }
+            } else if (isAllSkeletonsMode) {
+                Log.i(TAG, "All skeletons mode active: bypassing manual stub preloader to let libQnnHtp.so choose dynamically")
+            }
 
             val libsToLoad = listOf(
                 "libc++.so",
@@ -228,7 +257,6 @@ object OnnxBackendFactory {
                 "vendor.qti.hardware.dsp@1.0.so",
                 "libcdsprpc.so",
                 "libQnnSystem.so",
-                "libQnnHtpV75Stub.so",
                 "libQnnHtp.so",
                 "libonnxruntime.so",
                 "libonnxruntime4j_jni.so"
@@ -451,7 +479,8 @@ object OnnxBackendFactory {
         }
 
         // 1. Try Qualcomm QNN (NPU/HTP hardware acceleration)
-        val qnnBackendPath = findOrExtractQnnBackend(context, moduleApkPath)
+        val isExplicitStandardOrt = SingSettings.getQnnUnmappedSocMode(context) == SingSettings.QNN_UNMAPPED_STANDARD_ORT
+        val qnnBackendPath = if (isExplicitStandardOrt) null else findOrExtractQnnBackend(context, moduleApkPath)
         if (qnnBackendPath != null) {
             try {
                 Log.i(TAG, "Trying Qualcomm QNN EP (Hexagon HTP) for ${modelInfo.id} (backend: $qnnBackendPath)...")
