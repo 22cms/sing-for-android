@@ -533,25 +533,29 @@ object OnnxBackendFactory {
         threads: Int,
         modelInfo: ModelLoader.ModelInfo
     ): OrtSession {
-        try {
-            // Try every ONNX model; unsupported nodes can use ORT's CPU EP.
-            val opts = OrtSession.SessionOptions()
-            val session = try {
-                opts.setOptimizationLevel(OrtSession.SessionOptions.OptLevel.EXTENDED_OPT)
-                opts.setIntraOpNumThreads(threads)
-                opts.setSessionLogLevel(OrtLoggingLevel.ORT_LOGGING_LEVEL_WARNING)
-                opts.setLoggerId("AppleSing_ORT")
-                opts.addXnnpack(mapOf("num_threads" to threads.toString()))
-                Log.i(TAG, "Configured XNNPACK Execution Provider for ${modelInfo.id} ($threads threads)")
-                env.createSession(modelPath, opts)
-            } finally {
-                opts.close()
+        val isFp16 = modelInfo.precision.equals("FP16", ignoreCase = true)
+        // XNNPACK does not support float16 operators and corrupts audio on FP16 models.
+        // Use XNNPACK for FP32 models only; FP16 models compute cleanly via ORT default CPU EP.
+        if (!isFp16) {
+            try {
+                val opts = OrtSession.SessionOptions()
+                val session = try {
+                    opts.setOptimizationLevel(OrtSession.SessionOptions.OptLevel.EXTENDED_OPT)
+                    opts.setIntraOpNumThreads(threads)
+                    opts.setSessionLogLevel(OrtLoggingLevel.ORT_LOGGING_LEVEL_WARNING)
+                    opts.setLoggerId("AppleSing_ORT")
+                    opts.addXnnpack(mapOf("num_threads" to threads.toString()))
+                    Log.i(TAG, "Configured XNNPACK Execution Provider for ${modelInfo.id} ($threads threads)")
+                    env.createSession(modelPath, opts)
+                } finally {
+                    opts.close()
+                }
+                activeProviderShort = "ONNX Runtime XNNPACK, $threads threads"
+                activeProviderName = "${modelInfo.precision} via ONNX Runtime XNNPACK (CPU, $threads threads)"
+                return session
+            } catch (e: Throwable) {
+                Log.w(TAG, "Failed XNNPACK session: ${e.message}, falling back to Default CPU")
             }
-            activeProviderShort = "ONNX Runtime XNNPACK, $threads threads"
-            activeProviderName = "${modelInfo.precision} via ONNX Runtime XNNPACK (CPU, $threads threads)"
-            return session
-        } catch (e: Throwable) {
-            Log.w(TAG, "Failed XNNPACK session: ${e.message}, falling back to Default CPU")
         }
 
         val defaultOpts = OrtSession.SessionOptions().apply {
