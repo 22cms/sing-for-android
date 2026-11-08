@@ -138,12 +138,24 @@ object NativeLibDownloader {
     fun isUnmappedQualcommHtp(context: Context): Boolean {
         val abi = android.os.Build.SUPPORTED_ABIS.firstOrNull() ?: "arm64-v8a"
         if (!abi.startsWith("arm64")) return false
+        if (org.francasio.sing.provider.SingSettings.getForceNoQnnSocState(context)) return false
+        if (org.francasio.sing.provider.SingSettings.getForceUnknownQcomSocState(context)) return true
         return DeviceHelper.isQualcommWithHexagonHtp && requiredSkeleton(context) == null
     }
 
     fun requiredSkeleton(context: Context): String? {
         val abi = android.os.Build.SUPPORTED_ABIS.firstOrNull() ?: "arm64-v8a"
         if (!abi.startsWith("arm64")) return null
+
+        // Debug flag overrides
+        if (org.francasio.sing.provider.SingSettings.getForceNoQnnSocState(context)) {
+            Log.d(TAG, "FORCE_NO_HTP_SOC_STATE active -> returning null for skeleton")
+            return null
+        }
+        if (org.francasio.sing.provider.SingSettings.getForceUnknownQcomSocState(context)) {
+            Log.d(TAG, "FORCE_UNKNOWN_QCOM_SOC_STATE active -> returning null for skeleton")
+            return null
+        }
 
         // 1. First priority: Direct FastRPC query to CDSP for HEXAGON_CPU_ARCH
         try {

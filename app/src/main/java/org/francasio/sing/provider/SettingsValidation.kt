@@ -8,7 +8,8 @@ internal object SettingsValidation {
         SingSettings.KEY_ENGLISH_TRANSLATION_FALLBACK, SingSettings.KEY_ECO_MODE,
         SingSettings.KEY_FORCE_CPU, SingSettings.KEY_ALLOW_ZERO_FLOOR,
         SingSettings.KEY_FORCE_SONG_ELIGIBILITY, SingSettings.KEY_MATERIAL_YOU,
-        SingSettings.KEY_BACK_TIP_LEARNED
+        SingSettings.KEY_BACK_TIP_LEARNED, SingSettings.KEY_FORCE_UNKNOWN_QCOM_SOC_STATE,
+        SingSettings.KEY_FORCE_NO_HTP_SOC_STATE, SingSettings.KEY_DEBUG_MODEL_FETCHING
     )
 
     fun isValidSetting(key: String, value: Any?): Boolean = when (key) {

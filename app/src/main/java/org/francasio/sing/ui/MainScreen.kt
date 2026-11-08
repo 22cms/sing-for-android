@@ -92,6 +92,7 @@ fun MainScreen(
     onNavigateToModelSelection: (scrollToSelected: Boolean) -> Unit = {},
     onNavigateToInfo: () -> Unit = {},
     onBackFromMusic: () -> Unit = {},
+    onOpenFlags: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -229,7 +230,8 @@ fun MainScreen(
             openedFromMusic = openedFromMusic,
             apkVersion = apkVersion,
             onBackFromMusic = onBackFromMusic,
-            onNavigateToInfo = onNavigateToInfo
+            onNavigateToInfo = onNavigateToInfo,
+            onOpenFlags = onOpenFlags
         )
     }
 }

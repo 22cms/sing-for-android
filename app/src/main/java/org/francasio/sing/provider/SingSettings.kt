@@ -38,12 +38,15 @@ object SingSettings {
     const val KEY_QNN_UNMAPPED_SOC_MODE = "qnn_unmapped_soc_mode"
     const val QNN_UNMAPPED_ALL_SKELETONS = "all_skeletons"
     const val QNN_UNMAPPED_STANDARD_ORT = "standard_ort"
+    const val KEY_FORCE_UNKNOWN_QCOM_SOC_STATE = "force_unknown_qcom_soc_state"
+    const val KEY_FORCE_NO_HTP_SOC_STATE = "force_no_htp_soc_state"
+    const val KEY_DEBUG_MODEL_FETCHING = "debug_model_fetching"
     var isDebugOverride: Boolean? = null
 
     fun isDebug(context: Context?): Boolean {
         isDebugOverride?.let { return it }
-        if (context == null) return false
-        return (context.applicationInfo.flags and android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE) != 0
+        if (context == null) return debugModelFetching
+        return getDebugModelFetching(context)
     }
 
     val isArm64: Boolean
@@ -166,20 +169,115 @@ object SingSettings {
         moduleVersion = prefs.getString(KEY_HEARTBEAT_ENGINE_VERSION, null)
         activeProvider = prefs.getString(KEY_ACTIVE_PROVIDER, "") ?: ""
         qnnUnmappedSocMode = prefs.getString(KEY_QNN_UNMAPPED_SOC_MODE, "") ?: ""
+        forceUnknownQcomSocState = prefs.getBoolean(KEY_FORCE_UNKNOWN_QCOM_SOC_STATE, false)
+        forceNoQnnSocState = prefs.getBoolean(KEY_FORCE_NO_HTP_SOC_STATE, false)
+        debugModelFetching = if (prefs.contains(KEY_DEBUG_MODEL_FETCHING)) {
+            prefs.getBoolean(KEY_DEBUG_MODEL_FETCHING, false)
+        } else {
+            (context.applicationInfo.flags and android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE) != 0
+        }
+    }
+
+    @Volatile
+    var forceUnknownQcomSocState: Boolean = false
+
+    fun getForceUnknownQcomSocState(context: Context?): Boolean {
+        if (forceUnknownQcomSocState) return true
+        if (context == null) return forceUnknownQcomSocState
+        val prefsName = if (context.packageName == "org.francasio.sing") PREFS_MODULE else PREFS_CACHE
+        val prefs = context.getSharedPreferences(prefsName, Context.MODE_PRIVATE)
+        val value = prefs.getBoolean(KEY_FORCE_UNKNOWN_QCOM_SOC_STATE, false)
+        forceUnknownQcomSocState = value
+        return value
+    }
+
+    fun setForceUnknownQcomSocState(context: Context, enabled: Boolean) {
+        forceUnknownQcomSocState = enabled
+        val prefsName = if (context.packageName == "org.francasio.sing") PREFS_MODULE else PREFS_CACHE
+        val prefs = context.getSharedPreferences(prefsName, Context.MODE_PRIVATE)
+        prefs.edit().putBoolean(KEY_FORCE_UNKNOWN_QCOM_SOC_STATE, enabled).apply()
+        broadcastSettings(context)
+        onLocalSettingsChanged?.invoke()
+    }
+
+    @Volatile
+    var forceNoQnnSocState: Boolean = false
+
+    fun getForceNoQnnSocState(context: Context?): Boolean {
+        if (forceNoQnnSocState) return true
+        if (context == null) return forceNoQnnSocState
+        val prefsName = if (context.packageName == "org.francasio.sing") PREFS_MODULE else PREFS_CACHE
+        val prefs = context.getSharedPreferences(prefsName, Context.MODE_PRIVATE)
+        val value = prefs.getBoolean(KEY_FORCE_NO_HTP_SOC_STATE, false)
+        forceNoQnnSocState = value
+        return value
+    }
+
+    fun setForceNoQnnSocState(context: Context, enabled: Boolean) {
+        forceNoQnnSocState = enabled
+        val prefsName = if (context.packageName == "org.francasio.sing") PREFS_MODULE else PREFS_CACHE
+        val prefs = context.getSharedPreferences(prefsName, Context.MODE_PRIVATE)
+        prefs.edit().putBoolean(KEY_FORCE_NO_HTP_SOC_STATE, enabled).apply()
+        broadcastSettings(context)
+        onLocalSettingsChanged?.invoke()
+    }
+
+    @Volatile
+    var debugModelFetching: Boolean = false
+
+    fun getDebugModelFetching(context: Context?): Boolean {
+        if (context == null) return debugModelFetching
+        val prefsName = if (context.packageName == "org.francasio.sing") PREFS_MODULE else PREFS_CACHE
+        val prefs = context.getSharedPreferences(prefsName, Context.MODE_PRIVATE)
+        if (!prefs.contains(KEY_DEBUG_MODEL_FETCHING)) {
+            val defaultVal = (context.applicationInfo.flags and android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE) != 0
+            debugModelFetching = defaultVal
+            return defaultVal
+        }
+        val value = prefs.getBoolean(KEY_DEBUG_MODEL_FETCHING, false)
+        debugModelFetching = value
+        return value
+    }
+
+    fun setDebugModelFetching(context: Context, enabled: Boolean) {
+        debugModelFetching = enabled
+        val prefsName = if (context.packageName == "org.francasio.sing") PREFS_MODULE else PREFS_CACHE
+        val prefs = context.getSharedPreferences(prefsName, Context.MODE_PRIVATE)
+        prefs.edit().putBoolean(KEY_DEBUG_MODEL_FETCHING, enabled).apply()
+        broadcastSettings(context)
+        onLocalSettingsChanged?.invoke()
     }
 
     @Volatile
     var qnnUnmappedSocMode: String = ""
 
-    fun getQnnUnmappedSocMode(context: Context?): String {
+    fun getQnnUnmappedSocMode(context: Context): String {
         if (qnnUnmappedSocMode.isNotEmpty()) return qnnUnmappedSocMode
-        if (context == null) return qnnUnmappedSocMode
         val prefsName = if (context.packageName == "org.francasio.sing") PREFS_MODULE else PREFS_CACHE
         val prefs = context.getSharedPreferences(prefsName, Context.MODE_PRIVATE)
-        val value = prefs.getString(KEY_QNN_UNMAPPED_SOC_MODE, "") ?: ""
-        qnnUnmappedSocMode = value
-        return value
+        val mode = prefs.getString(KEY_QNN_UNMAPPED_SOC_MODE, "") ?: ""
+        if (mode.isNotEmpty()) {
+            qnnUnmappedSocMode = mode
+            return mode
+        }
+        if (context.packageName != "org.francasio.sing") {
+            try {
+                val uri = Uri.parse("content://org.francasio.sing.provider")
+                val bundle = context.contentResolver.call(uri, METHOD_GET_SETTINGS, null, null)
+                val provMode = bundle?.getString(KEY_QNN_UNMAPPED_SOC_MODE)
+                if (!provMode.isNullOrEmpty()) {
+                    qnnUnmappedSocMode = provMode
+                    prefs.edit().putString(KEY_QNN_UNMAPPED_SOC_MODE, provMode).apply()
+                    return provMode
+                }
+            } catch (t: Throwable) {
+                Log.w(TAG, "Failed querying qnnUnmappedSocMode from provider: ${t.message}")
+            }
+        }
+        return ""
     }
+
+    var onLocalSettingsChanged: (() -> Unit)? = null
 
     fun setQnnUnmappedSocMode(context: Context, mode: String) {
         qnnUnmappedSocMode = mode
@@ -187,6 +285,7 @@ object SingSettings {
         val prefs = context.getSharedPreferences(prefsName, Context.MODE_PRIVATE)
         prefs.edit().putString(KEY_QNN_UNMAPPED_SOC_MODE, mode).apply()
         broadcastSettings(context)
+        onLocalSettingsChanged?.invoke()
     }
 
     const val KEY_ACTIVE_PROVIDER = "active_provider"
@@ -277,7 +376,11 @@ object SingSettings {
             KEY_FORCE_SONG_ELIGIBILITY -> forceSongEligibility = value
             KEY_MATERIAL_YOU -> materialYou = value
             KEY_BACK_TIP_LEARNED -> backTipLearned = value
+            KEY_FORCE_UNKNOWN_QCOM_SOC_STATE -> forceUnknownQcomSocState = value
+            KEY_FORCE_NO_HTP_SOC_STATE -> forceNoQnnSocState = value
+            KEY_DEBUG_MODEL_FETCHING -> debugModelFetching = value
         }
+        onLocalSettingsChanged?.invoke()
     }
 
     fun setBackTipLearned(context: Context, learned: Boolean = true) {
@@ -308,6 +411,7 @@ object SingSettings {
                 prefs.edit().putBoolean(KEY_FORCE_CPU, value == TARGET_CPU).apply()
             }
         }
+        onLocalSettingsChanged?.invoke()
     }
 
     fun saveLocalInt(context: Context, key: String, value: Int) {
@@ -316,6 +420,7 @@ object SingSettings {
         when (key) {
             KEY_THREAD_COUNT -> threadCount = value
         }
+        onLocalSettingsChanged?.invoke()
     }
 
     fun updateHasDownloadedModels(context: Context): Boolean {
@@ -354,6 +459,9 @@ object SingSettings {
             putExtra(KEY_ALLOW_ZERO_FLOOR, allowZeroFloor)
             putExtra(KEY_FORCE_SONG_ELIGIBILITY, forceSongEligibility)
             putExtra(KEY_QNN_UNMAPPED_SOC_MODE, qnnUnmappedSocMode)
+            putExtra(KEY_FORCE_UNKNOWN_QCOM_SOC_STATE, forceUnknownQcomSocState)
+            putExtra(KEY_FORCE_NO_HTP_SOC_STATE, forceNoQnnSocState)
+            putExtra(KEY_DEBUG_MODEL_FETCHING, debugModelFetching)
             putExtra("module_apk_path", context.applicationInfo.sourceDir)
             if (modelInfo != null) {
                 putExtra("model_target_stem", modelInfo.targetStem)
@@ -424,6 +532,9 @@ object SingSettings {
                 allowZeroFloor = bundle.getBoolean(KEY_ALLOW_ZERO_FLOOR, allowZeroFloor)
                 forceSongEligibility = bundle.getBoolean(KEY_FORCE_SONG_ELIGIBILITY, forceSongEligibility)
                 qnnUnmappedSocMode = bundle.getString(KEY_QNN_UNMAPPED_SOC_MODE, qnnUnmappedSocMode)
+                forceUnknownQcomSocState = bundle.getBoolean(KEY_FORCE_UNKNOWN_QCOM_SOC_STATE, forceUnknownQcomSocState)
+                forceNoQnnSocState = bundle.getBoolean(KEY_FORCE_NO_HTP_SOC_STATE, forceNoQnnSocState)
+                debugModelFetching = bundle.getBoolean(KEY_DEBUG_MODEL_FETCHING, debugModelFetching)
 
                 val apkPath = bundle.getString("module_apk_path")
                 if (!apkPath.isNullOrBlank() && java.io.File(apkPath).exists()) {
@@ -448,6 +559,9 @@ object SingSettings {
                         .putBoolean(KEY_ALLOW_ZERO_FLOOR, allowZeroFloor)
                         .putBoolean(KEY_FORCE_SONG_ELIGIBILITY, forceSongEligibility)
                         .putString(KEY_QNN_UNMAPPED_SOC_MODE, qnnUnmappedSocMode)
+                        .putBoolean(KEY_FORCE_UNKNOWN_QCOM_SOC_STATE, forceUnknownQcomSocState)
+                        .putBoolean(KEY_FORCE_NO_HTP_SOC_STATE, forceNoQnnSocState)
+                        .putBoolean(KEY_DEBUG_MODEL_FETCHING, debugModelFetching)
                         .apply()
                 } catch (_: Throwable) {}
 
@@ -554,6 +668,9 @@ object SingSettings {
             allowZeroFloor = prefs.getBoolean(KEY_ALLOW_ZERO_FLOOR, false)
             forceSongEligibility = prefs.getBoolean(KEY_FORCE_SONG_ELIGIBILITY, false)
             qnnUnmappedSocMode = prefs.getString(KEY_QNN_UNMAPPED_SOC_MODE, "") ?: ""
+            forceUnknownQcomSocState = prefs.getBoolean(KEY_FORCE_UNKNOWN_QCOM_SOC_STATE, false)
+            forceNoQnnSocState = prefs.getBoolean(KEY_FORCE_NO_HTP_SOC_STATE, false)
+            debugModelFetching = prefs.getBoolean(KEY_DEBUG_MODEL_FETCHING, false)
             Log.i(TAG, "Loaded cached settings: preserveSide=$preserveSide, twoWaySlider=$twoWaySlider, threads=$threadCount, ecoMode=$ecoMode, target=$hardwareTarget (forceCpu=$forceCpu), model=$selectedModelId, allowZeroFloor=$allowZeroFloor, forceSongEligibility=$forceSongEligibility")
         } catch (t: Throwable) {
             Log.w(TAG, "Could not load cached settings: ${t.message}")

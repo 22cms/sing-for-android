@@ -57,7 +57,7 @@ object DeviceHelper {
         Build.HARDWARE
     ).map { it.trim() }.filter { it.isNotEmpty() }
 
-    val isQualcommWithHexagonHtp: Boolean by lazy {
+    private val rawIsQualcommWithHexagonHtp: Boolean by lazy {
         val hardware = Build.HARDWARE.lowercase()
         val board = Build.BOARD.lowercase()
         val socManufacturer = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
@@ -81,4 +81,13 @@ object DeviceHelper {
         Log.i(TAG, "Hardware check: isQualcomm=$isQualcomm -> isHexagonHtp=$detected")
         detected
     }
+
+    val isQualcommWithHexagonHtp: Boolean
+        get() {
+            if (org.francasio.sing.provider.SingSettings.forceNoQnnSocState) {
+                Log.d(TAG, "FORCE_NO_HTP_SOC_STATE active -> isQualcommWithHexagonHtp = false")
+                return false
+            }
+            return rawIsQualcommWithHexagonHtp
+        }
 }

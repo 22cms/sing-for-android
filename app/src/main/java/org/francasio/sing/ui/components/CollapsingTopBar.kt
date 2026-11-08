@@ -6,6 +6,7 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.hoverable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsHoveredAsState
@@ -42,6 +43,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.painter.Painter
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
@@ -97,6 +99,7 @@ fun BoxScope.ExpressiveCollapsingTopBar(
     navigationIcon: NavigationIcon = NavigationIcon.None,
     pinnedTopBarHeight: Dp = CollapsingTopBarDefaults.PinnedTopBarHeight,
     maxContentWidth: Dp? = null,
+    onSubtitleLongClick: (() -> Unit)? = null,
     trailingAction: (@Composable BoxScope.(progress: Float) -> Unit)? = null
 ) {
     val context = LocalContext.current
@@ -347,6 +350,12 @@ fun BoxScope.ExpressiveCollapsingTopBar(
 
     // 3. Subtitle (fades out on scroll)
     if (subtitle != null && subtitleAlpha > 0f) {
+        val longClickMod = if (onSubtitleLongClick != null) {
+            Modifier.pointerInput(onSubtitleLongClick) {
+                detectTapGestures(onLongPress = { onSubtitleLongClick() })
+            }
+        } else Modifier
+
         Text(
             text = subtitle,
             color = TextSecondary.copy(alpha = subtitleAlpha),
@@ -354,6 +363,7 @@ fun BoxScope.ExpressiveCollapsingTopBar(
             modifier = Modifier
                 .offset(x = titleStartX, y = statusBarTop + 132.dp)
                 .padding(end = 24.dp)
+                .then(longClickMod)
                 .graphicsLayer {
                     alpha = subtitleAlpha
                 }

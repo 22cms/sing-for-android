@@ -48,6 +48,10 @@ class SingSettingsProvider : ContentProvider() {
                     putString(SingSettings.KEY_SELECTED_MODEL, SingSettings.selectedModelId)
                     putBoolean(SingSettings.KEY_ALLOW_ZERO_FLOOR, SingSettings.allowZeroFloor)
                     putBoolean(SingSettings.KEY_FORCE_SONG_ELIGIBILITY, SingSettings.forceSongEligibility)
+                    putString(SingSettings.KEY_QNN_UNMAPPED_SOC_MODE, SingSettings.qnnUnmappedSocMode)
+                    putBoolean(SingSettings.KEY_FORCE_UNKNOWN_QCOM_SOC_STATE, SingSettings.forceUnknownQcomSocState)
+                    putBoolean(SingSettings.KEY_FORCE_NO_HTP_SOC_STATE, SingSettings.forceNoQnnSocState)
+                    putBoolean(SingSettings.KEY_DEBUG_MODEL_FETCHING, SingSettings.debugModelFetching)
                     // Expose the module APK path over the provider so the host
                     // process can resolve native libs without relying on the
                     // (fragile) broadcast reply.

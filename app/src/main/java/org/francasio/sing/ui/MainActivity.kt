@@ -62,7 +62,8 @@ import org.francasio.sing.util.XposedStatus
 enum class AppScreen {
     MAIN,
     MODEL_SELECTION,
-    INFO
+    INFO,
+    FLAGS
 }
 
 class MainActivity : ComponentActivity() {
@@ -359,6 +360,12 @@ class MainActivity : ComponentActivity() {
                             closedViaPredictiveBack = false
                             currentScreenState.value = AppScreen.INFO
                         },
+                        onOpenFlags = {
+                            backProgress = 0f
+                            isPredictiveBackActive = false
+                            closedViaPredictiveBack = false
+                            currentScreenState.value = AppScreen.FLAGS
+                        },
                         onBackFromMusic = {
                             finish()
                         },
@@ -509,6 +516,46 @@ class MainActivity : ComponentActivity() {
                                 onVersionClick = {
                                     showWhatsNewState.value = true
                                 },
+                                onBack = {
+                                    closedViaPredictiveBack = false
+                                    currentScreenState.value = AppScreen.MAIN
+                                }
+                            )
+                        }
+                    }
+
+                    AnimatedVisibility(
+                        visible = (currentScreen == AppScreen.FLAGS),
+                        enter = slideInHorizontally(
+                            initialOffsetX = { fullWidth -> fullWidth },
+                            animationSpec = tween(durationMillis = 280, easing = FastOutSlowInEasing)
+                        ) + fadeIn(animationSpec = tween(durationMillis = 200)),
+                        exit = if (closedViaPredictiveBack || isPredictiveBackActive) {
+                            ExitTransition.None
+                        } else {
+                            slideOutHorizontally(
+                                targetOffsetX = { fullWidth -> fullWidth },
+                                animationSpec = tween(durationMillis = 260, easing = FastOutSlowInEasing)
+                            ) + fadeOut(animationSpec = tween(durationMillis = 200))
+                        }
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .graphicsLayer {
+                                    if (isPredictiveBackActive || backProgress > 0.001f) {
+                                        val s = 1f - backProgress * 0.10f
+                                        scaleX = s
+                                        scaleY = s
+                                        translationX = backProgress * size.width
+                                        alpha = (1f - backProgress * 0.15f).coerceIn(0f, 1f)
+                                        clip = true
+                                        shape = RoundedCornerShape((backProgress * 28).dp)
+                                        shadowElevation = (backProgress * 16).dp.toPx()
+                                    }
+                                }
+                        ) {
+                            FlagsScreen(
                                 onBack = {
                                     closedViaPredictiveBack = false
                                     currentScreenState.value = AppScreen.MAIN

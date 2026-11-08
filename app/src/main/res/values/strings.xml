@@ -149,4 +149,13 @@
     <string name="btn_qnn_standard_ort">Use Standard CPU</string>
     <string name="btn_cancel">Cancel</string>
 
+    <!-- Debug Flags Screen -->
+    <string name="title_flags">Debug Flags</string>
+    <string name="flag_section">Flags</string>
+    <string name="flag_force_no_qnn_soc_title">Force Non-Snapdragon/HTP State</string>
+    <string name="flag_force_no_qnn_soc_desc">Forces hardware detection to not recognize the SoC as a Snapdragon with Hexagon HTP support.</string>
+    <string name="flag_force_unknown_qcom_soc_title">Force Unknown Qualcomm SoC State</string>
+    <string name="flag_force_unknown_qcom_soc_desc">Forces hardware detection to not recognize the SoC as a known Snapdragon model.</string>
+    <string name="flag_debug_model_fetching_title">Route model and update fetching to localhost</string>
+    <string name="flag_debug_model_fetching_desc">Directs requests for models.json, latest.json, and weights to http://localhost:18200.</string>
 </resources>

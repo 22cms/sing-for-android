@@ -18,13 +18,15 @@ fun BoxScope.MainTopBar(
     openedFromMusic: Boolean,
     apkVersion: String,
     onBackFromMusic: () -> Unit,
-    onNavigateToInfo: () -> Unit
+    onNavigateToInfo: () -> Unit,
+    onOpenFlags: () -> Unit = {}
 ) {
     ExpressiveCollapsingTopBar(
         progress = progress,
         title = stringResource(id = R.string.app_name),
         subtitle = apkVersion,
         maxContentWidth = CollapsingTopBarDefaults.DefaultMaxContentWidth,
+        onSubtitleLongClick = onOpenFlags,
         navigationIcon = if (openedFromMusic) {
             NavigationIcon.Morphing(
                 icon = painterResource(id = R.drawable.ic_sing),
