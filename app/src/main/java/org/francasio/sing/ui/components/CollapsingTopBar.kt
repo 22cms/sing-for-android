@@ -72,7 +72,7 @@ sealed interface NavigationIcon {
 
 object CollapsingTopBarDefaults {
     val PinnedTopBarHeight: Dp = 64.dp
-    val ExpandedTitleTop: Dp = 136.dp
+    val ExpandedTitleTop: Dp = 120.dp
     val ContentGap: Dp = 24.dp
     val DefaultMaxContentWidth: Dp = 680.dp
 }
