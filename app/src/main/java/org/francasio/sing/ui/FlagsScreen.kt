@@ -6,15 +6,12 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.WindowInsets
-import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
@@ -43,6 +40,8 @@ import androidx.compose.ui.unit.sp
 import org.francasio.sing.R
 import org.francasio.sing.provider.SingSettings
 import org.francasio.sing.ui.components.CollapsingTopBarDefaults
+import org.francasio.sing.ui.components.CollapsingTopBarContentSpacer
+import org.francasio.sing.ui.components.rememberCollapsingTopBarLayout
 import org.francasio.sing.ui.components.ExpressiveCollapsingTopBar
 import org.francasio.sing.ui.components.GroupedSection
 import org.francasio.sing.ui.components.NavigationIcon
@@ -63,10 +62,10 @@ fun FlagsScreen(
 ) {
     val context = LocalContext.current
     val scrollState = rememberScrollState()
-    val statusBarTop = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
+    val headerLayout = rememberCollapsingTopBarLayout(stringResource(R.string.title_flags))
     val progress = rememberCollapsingProgress(
         scrollState = scrollState,
-        collapseRange = CollapsingTopBarDefaults.CollapseRangeCompact
+        collapseRange = headerLayout.collapseRange
     )
 
     var forceNoQnnSoc by remember {
@@ -96,7 +95,7 @@ fun FlagsScreen(
                     .fillMaxWidth()
                     .padding(horizontal = 16.dp)
             ) {
-                Spacer(modifier = Modifier.height(statusBarTop + CollapsingTopBarDefaults.ContentPaddingCompact))
+                CollapsingTopBarContentSpacer(headerLayout)
 
                 GroupedSection(title = stringResource(id = R.string.flag_section)) {
                     item {

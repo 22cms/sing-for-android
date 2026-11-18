@@ -18,9 +18,9 @@ import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
-import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBars
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -28,9 +28,7 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -39,7 +37,7 @@ import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.painter.Painter
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -48,11 +46,16 @@ import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.rememberTextMeasurer
+import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.take
 import kotlinx.coroutines.launch
@@ -67,24 +70,87 @@ sealed interface NavigationIcon {
     data object None : NavigationIcon
 }
 
-val LocalTopBarContentMargin = compositionLocalOf { 0.dp }
-
 object CollapsingTopBarDefaults {
     val PinnedTopBarHeight: Dp = 64.dp
-    val CollapseRangeDefault: Dp = 110.dp
-    val CollapseRangeCompact: Dp = 100.dp
-    val ContentPaddingExpanded: Dp = 196.dp
-    val ContentPaddingCompact: Dp = 140.dp
+    val ExpandedTitleTop: Dp = 136.dp
+    val ContentGap: Dp = 24.dp
     val DefaultMaxContentWidth: Dp = 680.dp
+}
+
+data class CollapsingTopBarLayout(
+    val titleWidth: Dp,
+    val titleHeight: Dp,
+    val subtitleHeight: Dp
+) {
+    val subtitleTop: Dp get() = CollapsingTopBarDefaults.ExpandedTitleTop + titleHeight + 4.dp
+    val contentTop: Dp get() = CollapsingTopBarDefaults.ExpandedTitleTop + titleHeight +
+        (if (subtitleHeight > 0.dp) 4.dp + subtitleHeight else 0.dp) + CollapsingTopBarDefaults.ContentGap
+    val collapseRange: Dp get() = contentTop - CollapsingTopBarDefaults.PinnedTopBarHeight - CollapsingTopBarDefaults.ContentGap
+}
+
+/** Measure the same text bounds used by the header, including wrapping and font scaling. */
+@Composable
+fun rememberCollapsingTopBarLayout(
+    title: String,
+    subtitle: String? = null,
+    maxContentWidth: Dp? = CollapsingTopBarDefaults.DefaultMaxContentWidth
+): CollapsingTopBarLayout {
+    val density = LocalDensity.current
+    val screenWidth = LocalConfiguration.current.screenWidthDp.dp
+    val width = (maxContentWidth?.let { minOf(it, screenWidth) } ?: screenWidth) - 48.dp
+    val measurer = rememberTextMeasurer()
+    val baseStyle = androidx.compose.material3.LocalTextStyle.current
+    val constraints = Constraints(maxWidth = with(density) { width.roundToPx() }.coerceAtLeast(1))
+    val titleSize = measurer.measure(
+        AnnotatedString(title),
+        style = baseStyle.merge(TextStyle(fontSize = 36.sp, lineHeight = 44.sp, fontWeight = FontWeight.SemiBold)),
+        constraints = constraints
+    ).size
+    val subtitleSize = subtitle?.let {
+        measurer.measure(
+            AnnotatedString(it),
+            style = baseStyle.merge(TextStyle(fontSize = 13.5.sp, lineHeight = 20.sp)),
+            constraints = constraints
+        ).size
+    }
+    return with(density) {
+        CollapsingTopBarLayout(width, titleSize.height.toDp(), subtitleSize?.height?.toDp() ?: 0.dp)
+    }
+}
+
+@Composable
+fun CollapsingTopBarContentSpacer(layout: CollapsingTopBarLayout) {
+    val statusBarTop = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
+    androidx.compose.foundation.layout.Spacer(Modifier.height(statusBarTop + layout.contentTop))
 }
 
 @Composable
 fun rememberCollapsingProgress(
     scrollState: ScrollState,
-    collapseRange: Dp = CollapsingTopBarDefaults.CollapseRangeDefault
+    collapseRange: Dp
 ): Float {
     val density = LocalDensity.current
     val collapseRangePx = with(density) { collapseRange.toPx() }
+
+    // Material's `scroll|exitUntilCollapsed|snap` behavior settles a partially
+    // collapsed app bar to one of its two resting positions after a gesture.
+    LaunchedEffect(scrollState, collapseRangePx) {
+        var wasScrolling = false
+        snapshotFlow { scrollState.isScrollInProgress }
+            .distinctUntilChanged()
+            .collect { isScrolling ->
+                if (wasScrolling && !isScrolling) {
+                    val value = scrollState.value
+                    val collapseRangeInt = collapseRangePx.toInt()
+                    if (value in 1 until collapseRangeInt) {
+                        val target = if (value >= collapseRangePx / 2f) collapseRangeInt else 0
+                        scrollState.animateScrollTo(target)
+                    }
+                }
+                wasScrolling = isScrolling
+            }
+    }
+
     return if (collapseRangePx > 0f) {
         (scrollState.value.toFloat() / collapseRangePx).coerceIn(0f, 1f)
     } else 0f
@@ -98,11 +164,12 @@ fun BoxScope.ExpressiveCollapsingTopBar(
     subtitle: String? = null,
     navigationIcon: NavigationIcon = NavigationIcon.None,
     pinnedTopBarHeight: Dp = CollapsingTopBarDefaults.PinnedTopBarHeight,
-    maxContentWidth: Dp? = null,
+    maxContentWidth: Dp? = CollapsingTopBarDefaults.DefaultMaxContentWidth,
     onSubtitleLongClick: (() -> Unit)? = null,
-    trailingAction: (@Composable BoxScope.(progress: Float) -> Unit)? = null
+    trailingAction: (@Composable BoxScope.() -> Unit)? = null
 ) {
     val context = LocalContext.current
+    val layout = rememberCollapsingTopBarLayout(title, subtitle, maxContentWidth)
     val configuration = LocalConfiguration.current
     val screenWidth = configuration.screenWidthDp.dp
     val contentMargin = if (maxContentWidth != null && screenWidth > maxContentWidth) {
@@ -167,17 +234,20 @@ fun BoxScope.ExpressiveCollapsingTopBar(
             }
     }
 
+    // CollapsingToolbarLayout's scale mode tracks scroll progress linearly.
+    val titleProgress = progress
+
     val startFontSize = 36f
-    val endFontSize = 20f
-    val titleFontSize = (startFontSize - (startFontSize - endFontSize) * progress).sp
+    val endFontSize = 22f
+    val titleScale = 1f - (1f - endFontSize / startFontSize) * titleProgress
 
-    val titleStartX = contentMargin + 20.dp
-    val titleEndX = if (hasBackButton) 68.dp else 20.dp
-    val currentTitleX = titleStartX + (titleEndX - titleStartX) * progress
+    val titleStartX = contentMargin + 24.dp
+    val titleEndX = if (hasBackButton) 72.dp else 24.dp
+    val currentTitleX = titleStartX + (titleEndX - titleStartX) * titleProgress
 
-    val titleStartY = statusBarTop + 86.dp
+    val titleStartY = statusBarTop + CollapsingTopBarDefaults.ExpandedTitleTop
     val titleEndY = statusBarTop + (pinnedTopBarHeight - 28.dp) / 2
-    val currentTitleY = titleStartY - (titleStartY - titleEndY) * progress
+    val currentTitleY = titleStartY - (titleStartY - titleEndY) * titleProgress
 
     val iconAlpha = (1f - progress * 2.2f).coerceIn(0f, 1f)
     val iconScale = 1f - progress * 0.35f
@@ -289,14 +359,15 @@ fun BoxScope.ExpressiveCollapsingTopBar(
             }
         }
         is NavigationIcon.Back -> {
-            val circleSize = 52.dp - (12.dp * progress)
+            // A plain back glyph doesn't need the larger branded-icon circle.
+            val circleSize = 40.dp
             val circleStartX = contentMargin + 20.dp
             val circleEndX = 16.dp
             val circleX = circleStartX + (circleEndX - circleStartX) * progress
             val circleStartY = statusBarTop + 24.dp
             val circleEndY = statusBarTop + (pinnedTopBarHeight - 40.dp) / 2
             val circleY = circleStartY + (circleEndY - circleStartY) * progress
-            val arrowScale = circleSize / 40.dp
+            val arrowScale = 1f
 
             Box(
                 modifier = Modifier
@@ -360,9 +431,10 @@ fun BoxScope.ExpressiveCollapsingTopBar(
             text = subtitle,
             color = TextSecondary.copy(alpha = subtitleAlpha),
             fontSize = 13.5.sp,
+            lineHeight = 20.sp,
             modifier = Modifier
-                .offset(x = titleStartX, y = statusBarTop + 132.dp)
-                .padding(end = 24.dp)
+                .offset(x = titleStartX, y = statusBarTop + layout.subtitleTop)
+                .width(layout.titleWidth)
                 .then(longClickMod)
                 .graphicsLayer {
                     alpha = subtitleAlpha
@@ -374,32 +446,36 @@ fun BoxScope.ExpressiveCollapsingTopBar(
     Text(
         text = title,
         color = TextPrimary,
-        fontSize = titleFontSize,
+        fontSize = startFontSize.sp,
+        lineHeight = 44.sp,
         fontWeight = FontWeight.SemiBold,
-        modifier = Modifier.offset(x = currentTitleX, y = currentTitleY)
+        modifier = Modifier
+            .offset(x = currentTitleX, y = currentTitleY)
+            .width(layout.titleWidth)
+            .graphicsLayer {
+                scaleX = titleScale
+                scaleY = titleScale
+                transformOrigin = TransformOrigin(0f, 0f)
+            }
     )
 
-    // 5. Trailing Action Slot (e.g. pinned Info button)
-    CompositionLocalProvider(LocalTopBarContentMargin provides contentMargin) {
-        trailingAction?.invoke(this, progress)
-    }
+    // 5. Trailing Action Slot (pinned like a Material toolbar menu item)
+    trailingAction?.invoke(this)
 }
 
 @Composable
 fun BoxScope.TopBarActionButton(
     icon: ImageVector,
     contentDescription: String?,
-    progress: Float,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
     pinnedTopBarHeight: Dp = CollapsingTopBarDefaults.PinnedTopBarHeight
 ) {
     val statusBarTop = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
-    val contentMargin = LocalTopBarContentMargin.current
-    val currentRightOffset = -(16.dp + contentMargin * (1f - progress))
-    val actionStartY = statusBarTop + 30.dp
-    val actionEndY = statusBarTop + (pinnedTopBarHeight - 40.dp) / 2
-    val currentY = actionStartY + (actionEndY - actionStartY) * progress
+    val currentRightOffset = -8.dp
+    // Keep the action in the pinned toolbar, like a standard Material toolbar
+    // action, instead of animating it down from the expanded header.
+    val currentY = statusBarTop + (pinnedTopBarHeight - 48.dp) / 2
 
     Box(
         modifier = modifier
@@ -408,9 +484,8 @@ fun BoxScope.TopBarActionButton(
                 x = currentRightOffset,
                 y = currentY
             )
-            .size(40.dp)
+            .size(48.dp)
             .clip(CircleShape)
-            .background(SurfaceContainerHigh)
             .clickable(onClick = onClick),
         contentAlignment = Alignment.Center
     ) {
@@ -418,7 +493,7 @@ fun BoxScope.TopBarActionButton(
             imageVector = icon,
             contentDescription = contentDescription,
             tint = TextPrimary,
-            modifier = Modifier.size(22.dp)
+            modifier = Modifier.size(24.dp)
         )
     }
 }

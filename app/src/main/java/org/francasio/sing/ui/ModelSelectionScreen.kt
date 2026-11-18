@@ -58,6 +58,8 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import org.francasio.sing.R
 import org.francasio.sing.ui.components.CollapsingTopBarDefaults
+import org.francasio.sing.ui.components.CollapsingTopBarContentSpacer
+import org.francasio.sing.ui.components.rememberCollapsingTopBarLayout
 import org.francasio.sing.ui.components.ExpressiveCollapsingTopBar
 import org.francasio.sing.ui.components.NavigationIcon
 import org.francasio.sing.ui.components.rememberCollapsingProgress
@@ -124,7 +126,12 @@ fun ModelSelectionScreen(
 
     val statusBarTop = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
     val totalPinnedHeight = CollapsingTopBarDefaults.PinnedTopBarHeight + statusBarTop
-    val progress = rememberCollapsingProgress(scrollState)
+    val headerLayout = rememberCollapsingTopBarLayout(
+        stringResource(R.string.title_model_selection),
+        stringResource(R.string.desc_model_selection),
+        maxContentWidth = null
+    )
+    val progress = rememberCollapsingProgress(scrollState, headerLayout.collapseRange)
 
     val cardPositions = remember { mutableMapOf<String, Int>() }
     val highlightPulse = remember { Animatable(0f) }
@@ -194,8 +201,7 @@ fun ModelSelectionScreen(
                 .verticalScroll(scrollState)
                 .onGloballyPositioned { scrollContainerCoordinates = it }
         ) {
-            // Space to clear the large expanded header with comfortable breathing room
-            Spacer(modifier = Modifier.height(statusBarTop + 196.dp))
+            CollapsingTopBarContentSpacer(headerLayout)
 
             // Filter Chips Bar
             ModelFilterRow(
@@ -345,6 +351,7 @@ fun ModelSelectionScreen(
             progress = progress,
             title = stringResource(id = R.string.title_model_selection),
             subtitle = stringResource(id = R.string.desc_model_selection),
+            maxContentWidth = null,
             navigationIcon = NavigationIcon.Morphing(
                 icon = painterResource(id = R.drawable.ic_ai_models),
                 onBack = onBack

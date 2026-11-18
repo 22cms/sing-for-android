@@ -14,7 +14,7 @@ class SkeletonMappingTest {
         assertEquals("V73", NativeLibDownloader.mapSocToSkeleton("SM8635"))
         assertEquals("V73", NativeLibDownloader.mapSocToSkeleton("SM7675"))
         assertEquals("V75", NativeLibDownloader.mapSocToSkeleton("SM8650"))
-        assertEquals("V75", NativeLibDownloader.mapSocToSkeleton("SM8735"))
+        assertEquals("V73", NativeLibDownloader.mapSocToSkeleton("SM8735"))
         assertEquals("V79", NativeLibDownloader.mapSocToSkeleton("SM8750"))
         assertEquals("V81", NativeLibDownloader.mapSocToSkeleton("SM8850"))
     }

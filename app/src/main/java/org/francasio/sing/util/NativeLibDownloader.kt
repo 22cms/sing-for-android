@@ -112,14 +112,14 @@ object NativeLibDownloader {
                     s.startsWith("SM7450") || s.startsWith("SM7425") || s.startsWith("SXR2230P") ||
                     s.startsWith("SXR2250P") -> "V69"
 
-            // V73: Snapdragon 8 Gen 2, 8s Gen 3, 7+ Gen 3, 7 Gen 3, 7s Gen 2/3, 6 Gen 1, X Elite (PC)
-            s.startsWith("SM8550") || s.startsWith("SM8635") ||
+            // V73: Snapdragon 8 Gen 2, 8s Gen 3, 8s Gen 4, 7+ Gen 3, 7 Gen 3, 7s Gen 2/3, 6 Gen 1, X Elite (PC)
+            s.startsWith("SM8550") || s.startsWith("SM8635") || s.startsWith("SM8735") ||
                     s.startsWith("SM7675") || s.startsWith("SM7635") || s.startsWith("SM7550") ||
                     s.startsWith("SM7435") || s.startsWith("SM6450") || s.startsWith("SC8380XP") ||
                     s.startsWith("SAR2130P") || s.startsWith("SA8255") || s.startsWith("QCS9100") -> "V73"
 
-            // V75: Snapdragon 8 Gen 3 flagship, 8s Gen 4 & IoT equivalents
-            s.startsWith("SM8650") || s.startsWith("SM8735") || s.startsWith("QCS8625") ||
+            // V75: Snapdragon 8 Gen 3 flagship & IoT equivalents
+            s.startsWith("SM8650") || s.startsWith("QCS8625") ||
                     s.startsWith("QCS8300") || s.startsWith("QCS8275") -> "V75"
 
             // V79: Snapdragon 8 Elite / 8 Gen 4

@@ -8,15 +8,12 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.WindowInsets
-import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
@@ -47,6 +44,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import org.francasio.sing.R
 import org.francasio.sing.ui.components.CollapsingTopBarDefaults
+import org.francasio.sing.ui.components.CollapsingTopBarContentSpacer
+import org.francasio.sing.ui.components.rememberCollapsingTopBarLayout
 import org.francasio.sing.ui.components.ExpressiveCollapsingTopBar
 import org.francasio.sing.ui.components.GroupedCardItem
 import org.francasio.sing.ui.components.NavigationIcon
@@ -81,10 +80,10 @@ fun InfoScreen(
 ) {
     val context = LocalContext.current
     val scrollState = rememberScrollState()
-    val statusBarTop = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
+    val headerLayout = rememberCollapsingTopBarLayout(stringResource(R.string.title_info))
     val progress = rememberCollapsingProgress(
         scrollState = scrollState,
-        collapseRange = CollapsingTopBarDefaults.CollapseRangeCompact
+        collapseRange = headerLayout.collapseRange
     )
 
     val appVersion = DeviceHelper.getAppVersion(context)
@@ -154,13 +153,13 @@ fun InfoScreen(
                     .fillMaxWidth()
                     .padding(horizontal = 16.dp)
             ) {
-                Spacer(modifier = Modifier.height(statusBarTop + 140.dp))
+                CollapsingTopBarContentSpacer(headerLayout)
 
             // 1. App Identity
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(vertical = 12.dp),
+                    .padding(bottom = 12.dp),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
                 Box(

@@ -35,11 +35,10 @@ fun BoxScope.MainTopBar(
         } else {
             NavigationIcon.Fading(painterResource(id = R.drawable.ic_sing))
         },
-        trailingAction = { actionProgress ->
+        trailingAction = {
             TopBarActionButton(
                 icon = Icons.Outlined.Info,
                 contentDescription = stringResource(id = R.string.action_info),
-                progress = actionProgress,
                 onClick = onNavigateToInfo
             )
         }
