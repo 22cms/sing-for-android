@@ -254,7 +254,7 @@ fun SettingHardwareTargetRow(
             verticalAlignment = Alignment.CenterVertically
         ) {
             Icon(
-                painter = painterResource(id = R.drawable.ic_engine_sparkles),
+                painter = painterResource(id = R.drawable.ic_cpu_sparkle),
                 contentDescription = null,
                 tint = TextPrimary,
                 modifier = Modifier.size(24.dp)

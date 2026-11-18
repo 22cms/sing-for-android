@@ -42,7 +42,7 @@ fun LyricsSettingsCard(
         }
         item {
             SettingSwitchRow(
-                icon = painterResource(id = R.drawable.ic_translate_missing),
+                icon = painterResource(id = R.drawable.ic_translate_warning),
                 title = stringResource(id = R.string.setting_english_translation_fallback_title),
                 description = stringResource(id = R.string.desc_english_translation_fallback),
                 checked = englishTranslationFallback,
